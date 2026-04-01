@@ -1,12 +1,23 @@
 import os
 import re
-import time
 import streamlit as st
-from google import genai
-from google.genai import types
 
 # =========================
-# STREAMLIT PAGE SETTINGS
+# SAFE IMPORT FOR GEMINI SDK
+# =========================
+GENAI_AVAILABLE = True
+GENAI_IMPORT_ERROR = ""
+
+try:
+    from google import genai
+    from google.genai import types
+except Exception as e:
+    GENAI_AVAILABLE = False
+    GENAI_IMPORT_ERROR = str(e)
+
+
+# =========================
+# PAGE CONFIG
 # =========================
 st.set_page_config(
     page_title="AgriVision AI Chat",
@@ -16,7 +27,7 @@ st.set_page_config(
 )
 
 # =========================
-# CUSTOM CSS
+# STYLES
 # =========================
 st.markdown("""
 <style>
@@ -50,10 +61,6 @@ st.markdown("""
     font-size: 1.05rem;
     opacity: 0.96;
 }
-.small-muted {
-    color: #64748b;
-    font-size: 0.9rem;
-}
 .badge-good {
     background: #dcfce7;
     color: #166534;
@@ -61,6 +68,10 @@ st.markdown("""
     border-radius: 999px;
     font-size: 0.8rem;
     font-weight: 700;
+}
+.small-muted {
+    color: #64748b;
+    font-size: 0.9rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -90,13 +101,13 @@ def get_gemini_api_key():
     except Exception:
         pass
 
-    env_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if env_key:
-        return env_key
+    key1 = os.getenv("GEMINI_API_KEY", "").strip()
+    if key1:
+        return key1
 
-    env_key_2 = os.getenv("GOOGLE_API_KEY", "").strip()
-    if env_key_2:
-        return env_key_2
+    key2 = os.getenv("GOOGLE_API_KEY", "").strip()
+    if key2:
+        return key2
 
     return ""
 
@@ -104,9 +115,22 @@ def get_gemini_api_key():
 # CLIENT
 # =========================
 def get_gemini_client():
+    if not GENAI_AVAILABLE:
+        return None, (
+            "Google Gen AI SDK is not installed.\n\n"
+            "Fix:\n"
+            "1. Create a requirements.txt file.\n"
+            "2. Add:\n"
+            "   streamlit\n"
+            "   google-genai\n"
+            "3. Rebuild/redeploy the app.\n\n"
+            f"Import error: {GENAI_IMPORT_ERROR}"
+        )
+
     api_key = get_gemini_api_key()
     if not api_key:
-        return None, "Missing API key. Add GEMINI_API_KEY in Streamlit secrets or environment variables."
+        return None, "Missing GEMINI_API_KEY. Add it in Streamlit secrets or environment variables."
+
     try:
         client = genai.Client(api_key=api_key)
         return client, None
@@ -116,76 +140,64 @@ def get_gemini_client():
 # =========================
 # ERROR FORMATTER
 # =========================
-def format_gemini_error(error_text: str) -> str:
+def format_gemini_error(error_text):
     text = str(error_text)
 
-    if "429" in text or "quota" in text.lower() or "rate limit" in text.lower():
+    if "429" in text or "quota" in text.lower():
         retry_match = re.search(r"retry in\s+([\d\.]+)s", text, re.IGNORECASE)
-        retry_hint = ""
-        if retry_match:
-            retry_hint = f" Try again after about {retry_match.group(1)} seconds."
+        retry_hint = f" Retry after about {retry_match.group(1)} seconds." if retry_match else ""
 
         return (
-            "Gemini quota exceeded for this project. "
-            "This usually means your Google AI project has no free-tier quota left, "
-            "billing is not enabled, or the daily/request/token limit has been reached."
+            "Gemini quota exceeded for this project."
             + retry_hint
-            + "\n\nFix:\n"
-            "1. Open Google AI Studio.\n"
-            "2. Check the project linked to your API key.\n"
-            "3. Enable billing or use a project with active quota.\n"
-            "4. Then retry."
+            + "\n\nPossible reasons:\n"
+            "- Free-tier limit finished.\n"
+            "- Billing not enabled.\n"
+            "- Requests per minute/day exceeded.\n\n"
+            "Fix:\n"
+            "1. Check your Google AI Studio project.\n"
+            "2. Enable billing if needed.\n"
+            "3. Use a valid API key from a project with quota."
         )
 
-    if "API key" in text or "invalid" in text.lower():
-        return "Invalid Gemini API key. Please check your GEMINI_API_KEY."
+    if "invalid" in text.lower() and "api" in text.lower():
+        return "Invalid Gemini API key. Please verify GEMINI_API_KEY."
 
     if "not found" in text.lower() and "model" in text.lower():
-        return "The selected Gemini model is not available for your current API/version/project."
+        return "The Gemini model is not available for your project or API version."
 
     return f"Gemini chatbot error: {text}"
 
 # =========================
-# CHAT FUNCTION
+# CHATBOT REPLY
 # =========================
 def get_gemini_reply(user_text, district, season, language):
-    client, client_error = get_gemini_client()
-    if client_error:
-        return client_error
+    client, error = get_gemini_client()
+    if error:
+        return error
 
-    system_prompt = f"""
-You are AgriVision AI, a practical agriculture assistant for farmers and beginners in India.
+    system_instruction = f"""
+You are AgriVision AI, an agriculture chatbot for India.
 
-User location: {district}, Telangana, India
+User district: {district}, Telangana
 Season: {season}
 Preferred language: {language}
 
 Rules:
-- Reply in simple, beginner-friendly language.
-- Focus on agriculture, crops, irrigation, fertilizer, disease prevention, soil health, market planning, and weather-based farm advice.
-- Give practical action steps.
-- Keep answers concise but useful.
-- If the user asks in English, reply in English.
-- If the user asks in Telugu, reply in simple Telugu.
-- If something depends on local field conditions, say so clearly.
+- Give practical farming guidance.
+- Use simple beginner-friendly language.
+- Focus on crop planning, irrigation, fertilizer, pests, disease, soil health, and farm management.
+- Keep answers clear and useful.
+- If user writes in Telugu, reply in simple Telugu.
+- Otherwise reply in English.
 """
-
-    messages = [
-        types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=system_prompt)]
-        ),
-        types.Content(
-            role="user",
-            parts=[types.Part.from_text(text=user_text)]
-        )
-    ]
 
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=messages,
+            contents=user_text,
             config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
                 temperature=0.4,
                 max_output_tokens=700
             )
@@ -194,37 +206,13 @@ Rules:
         if hasattr(response, "text") and response.text:
             return response.text.strip()
 
-        return "No response generated from Gemini."
+        return "No response generated."
 
     except Exception as e:
         return format_gemini_error(str(e))
 
 # =========================
-# HEADER
-# =========================
-def render_header():
-    st.markdown(
-        f"""
-        <div class="hero-dashboard">
-            <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;'>
-                <div>
-                    <h1 class="farm-title">AgriVision AI Chat</h1>
-                    <p class="subtitle">Gemini-powered agriculture assistant</p>
-                </div>
-                <div style='text-align:right;'>
-                    <div><span class="badge-good">Gemini 2.5 Flash</span></div>
-                    <div style='margin-top:0.5rem;font-size:0.95rem;'>
-                        📍 {st.session_state.district} | 🌾 {st.session_state.season}
-                    </div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# =========================
-# SIDEBAR
+# UI
 # =========================
 st.sidebar.title("🌾 AgriVision AI")
 
@@ -243,63 +231,80 @@ st.session_state.language = st.sidebar.selectbox(
     ["English", "Telugu"]
 )
 
-api_key_available = bool(get_gemini_api_key())
-st.sidebar.markdown("### API Status")
-st.sidebar.success("Gemini API key detected") if api_key_available else st.sidebar.error("Gemini API key missing")
+st.sidebar.markdown("### Setup Status")
+if GENAI_AVAILABLE:
+    st.sidebar.success("google-genai import OK")
+else:
+    st.sidebar.error("google-genai not installed")
 
-st.sidebar.markdown("### Suggested questions")
+if get_gemini_api_key():
+    st.sidebar.success("API key found")
+else:
+    st.sidebar.error("API key missing")
+
+st.sidebar.markdown("### Example prompts")
 st.sidebar.markdown("""
-- Which crop is suitable for Telangana in Kharif?
-- How often should I irrigate maize?
-- What fertilizer is good for paddy at early stage?
-- My cotton leaves are turning yellow, why?
-- How can I improve soil health naturally?
-- Tell me a 7-day farm care plan.
+- Best crop for Telangana in Kharif?
+- How to manage yellow leaves in paddy?
+- Give me drip irrigation advice for chilli.
+- Which fertilizer is best at vegetative stage?
+- How do I improve soil fertility naturally?
+- Tell me a weekly plan for maize crop.
 """)
 
-# =========================
-# MAIN UI
-# =========================
-render_header()
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    st.markdown("## Agriculture Chat Assistant")
-    st.markdown(
-        "<div class='info-card'>Ask crop, soil, irrigation, disease, fertilizer, market, or seasonal farming questions.</div>",
-        unsafe_allow_html=True
-    )
-
-with col2:
-    st.markdown(
-        f"""
-        <div class='info-card'>
-            <div class='small-muted'>Current setup</div>
-            <h4 style='margin-top:8px;color:#166534;'>District: {st.session_state.district}</h4>
-            <h4 style='margin-top:8px;color:#166534;'>Season: {st.session_state.season}</h4>
-            <h4 style='margin-top:8px;color:#166534;'>Language: {st.session_state.language}</h4>
+st.markdown(
+    f"""
+    <div class="hero-dashboard">
+        <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;'>
+            <div>
+                <h1 class="farm-title">AgriVision AI Chat</h1>
+                <p class="subtitle">Simple Gemini-powered farming assistant</p>
+            </div>
+            <div style='text-align:right;'>
+                <div><span class="badge-good">gemini-2.5-flash</span></div>
+                <div style='margin-top:0.5rem;font-size:0.95rem;'>
+                    📍 {st.session_state.district} | 🌾 {st.session_state.season} | 🗣️ {st.session_state.language}
+                </div>
+            </div>
         </div>
-        """,
-        unsafe_allow_html=True
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    <div class="info-card">
+        Ask any farming question about crops, irrigation, fertilizers, pests, diseases, soil health, or seasonal planning.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+if not GENAI_AVAILABLE:
+    st.error(
+        "Import failed for google-genai.\n\n"
+        "Add this to requirements.txt:\n"
+        "streamlit\n"
+        "google-genai"
     )
 
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-user_prompt = st.chat_input("Ask your farming question here...")
+prompt = st.chat_input("Ask your agriculture question...")
 
-if user_prompt:
-    st.session_state.chat_history.append({"role": "user", "content": user_prompt})
+if prompt:
+    st.session_state.chat_history.append({"role": "user", "content": prompt})
 
     with st.chat_message("user"):
-        st.markdown(user_prompt)
+        st.markdown(prompt)
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             reply = get_gemini_reply(
-                user_text=user_prompt,
+                user_text=prompt,
                 district=st.session_state.district,
                 season=st.session_state.season,
                 language=st.session_state.language
