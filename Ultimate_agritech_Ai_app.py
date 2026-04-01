@@ -1,6 +1,14 @@
-import random
+import os
+from datetime import datetime
+
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import streamlit as st
+
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 st.set_page_config(page_title="Agri Vision AI – Telangana Edition", page_icon="🌾", layout="wide")
 
@@ -132,11 +140,11 @@ def weather_label(rainfall, humidity):
 
 def irrigation_advice(crop, soil_moisture, temperature, rainfall, disease_name):
     if disease_name != "Healthy":
-        return "Low", "Reduce irrigation and avoid excess leaf wetness because disease risk is active."
+        return "Low", "Reduce irrigation and avoid extra leaf wetness because disease risk is active."
     if soil_moisture < 30 or (temperature > 34 and rainfall < 50):
-        return "High", "Immediate irrigation needed; prefer drip or early morning watering."
+        return "High", "Immediate irrigation needed; use drip or early morning watering."
     if soil_moisture < 45:
-        return "Medium", "Irrigation needed in 1-2 days; protect crop at flowering and grain filling stage."
+        return "Medium", "Irrigation needed in 1-2 days; protect crop during flowering and grain filling stage."
     return "Low", "Moisture is acceptable; avoid over-irrigation in Telangana field conditions."
 
 
@@ -149,7 +157,7 @@ def fertilizer_advice(crop, nitrogen, phosphorus, potassium, disease_name):
     if potassium < 25:
         low.append("potassium")
     if disease_name != "Healthy":
-        return "Reduced usage", "Disease detected, so avoid heavy fertilizer immediately. Use balanced corrective nutrition only after crop condition improves."
+        return "Reduced usage", "Disease detected, so avoid heavy fertilizer immediately. Use balanced corrective nutrition only after field inspection."
     if not low:
         return "Balanced usage", f"NPK looks acceptable for {crop}. Follow split doses and crop-stage based application."
     return "Targeted usage", f"Low {', '.join(low)} detected. For {crop}: {CROP_GUIDE.get(crop, {}).get('fert', 'Balanced fertilization recommended')}."
@@ -172,16 +180,14 @@ def ndvi_status(ndvi):
     return "Weak canopy"
 
 
-def build_intelligence_layer(crop, disease_name, ndvi, soil_moisture, rainfall, temperature, nitrogen, phosphorus, potassium):
+def build_intelligence_layer(crop, disease_name, soil_moisture, rainfall, temperature, nitrogen, phosphorus, potassium):
     irrigation_level, irrigation_text = irrigation_advice(crop, soil_moisture, temperature, rainfall, disease_name)
     fertilizer_level, fertilizer_text = fertilizer_advice(crop, nitrogen, phosphorus, potassium, disease_name)
-
     if disease_name != "Healthy":
-        fertilizer_level = "Reduced usage"
         irrigation_level = "Low"
-        irrigation_text = "Reduce irrigation because disease pressure is active and excess moisture can worsen infection."
-        fertilizer_text = "Reduce fertilizer usage temporarily and avoid heavy nitrogen until disease pressure comes down."
-
+        fertilizer_level = "Reduced usage"
+        irrigation_text = "Reduce irrigation because disease pressure is active and extra moisture can worsen infection."
+        fertilizer_text = "Reduce fertilizer usage for now and avoid heavy nitrogen until disease pressure comes down."
     return {
         "irrigation_level": irrigation_level,
         "irrigation_text": irrigation_text,
@@ -200,19 +206,30 @@ def calculate_risk_and_health(disease_name, ndvi, soil_moisture, nutrient_state)
         risk_score += 10
     if nutrient_state == "Weak":
         risk_score += 10
-
     if risk_score > 60:
         risk = "HIGH"
     elif risk_score >= 30:
         risk = "MEDIUM"
     else:
         risk = "LOW"
-
     health_score = max(10, 100 - risk_score)
     return risk_score, risk, health_score
 
 
-def build_smart_farm_report(location, season, crop, crop_conf, yield_total, yield_conf, weather_name, disease_name, disease_conf, risk, health_score, intelligence):
+def combined_decision_score(crop_confidence, yield_confidence, disease_confidence, health_score, risk_score):
+    score = (crop_confidence * 0.25) + (yield_confidence * 0.20) + (disease_confidence * 0.15) + (health_score * 0.25) + ((100 - risk_score) * 0.15)
+    return round(score, 2)
+
+
+def final_priority(risk_level, disease_name, soil_moisture, nutrient_state):
+    if risk_level == "HIGH":
+        return "URGENT"
+    if disease_name != "Healthy" or soil_moisture < 30 or nutrient_state == "Weak":
+        return "ATTENTION NEEDED"
+    return "STABLE"
+
+
+def build_smart_farm_report(location, season, crop, crop_conf, yield_total, yield_conf, weather_name, disease_name, disease_conf, risk, health_score, final_score, priority, intelligence):
     actions = []
     if intelligence["irrigation_level"] == "Low":
         actions.append("Reduce irrigation")
@@ -220,17 +237,14 @@ def build_smart_farm_report(location, season, crop, crop_conf, yield_total, yiel
         actions.append("Increase irrigation immediately")
     else:
         actions.append("Monitor irrigation in 1-2 days")
-
     if disease_name != "Healthy":
         actions.append("Apply fungicide or crop-protection spray after field inspection")
-
     if intelligence["fertilizer_level"] == "Reduced usage":
         actions.append("Avoid heavy nitrogen fertilizer now")
     elif intelligence["fertilizer_level"] == "Targeted usage":
         actions.append("Add balanced nitrogen-phosphorus-potassium correction")
     else:
         actions.append("Continue split fertilizer schedule")
-
     return {
         "location": location,
         "season": season,
@@ -243,22 +257,112 @@ def build_smart_farm_report(location, season, crop, crop_conf, yield_total, yiel
         "disease_conf": disease_conf,
         "risk": risk,
         "health_score": health_score,
+        "final_score": final_score,
+        "priority": priority,
         "actions": actions[:3],
     }
 
 
-def build_chatbot_reply(question, report, intelligence, ndvi_value, nutrient_state):
-    q = question.lower().strip()
-    intro = f"🤖 Agri Vision AI Assistant: Based on your Telangana farm report, crop is {report['crop']}, risk level is {report['risk']}, and health score is {report['health_score']}/100."
+def predict_all_modules(location, season, soil_type, area, temperature, humidity, rainfall, soil_moisture, ph, nitrogen, phosphorus, potassium, ndvi):
+    top_recommendations = recommend_crop(season, soil_type, temperature, humidity, rainfall, ph, nitrogen, phosphorus, potassium)
+    selected_crop = top_recommendations[0]["crop"]
+    crop_confidence = top_recommendations[0]["confidence"]
+    yield_per_acre, yield_total, yield_confidence = predict_yield(selected_crop, area, rainfall, temperature, soil_moisture, nitrogen, phosphorus, potassium)
+    disease_name, disease_confidence = predict_disease(selected_crop, ndvi, humidity, soil_moisture)
+    nutrient_state = nutrient_health(nitrogen, phosphorus, potassium)
+    weather_name = weather_label(rainfall, humidity)
+    intelligence = build_intelligence_layer(selected_crop, disease_name, soil_moisture, rainfall, temperature, nitrogen, phosphorus, potassium)
+    risk_score, risk_level, health_score = calculate_risk_and_health(disease_name, ndvi, soil_moisture, nutrient_state)
+    final_score = combined_decision_score(crop_confidence, yield_confidence, disease_confidence, health_score, risk_score)
+    priority = final_priority(risk_level, disease_name, soil_moisture, nutrient_state)
+    report = build_smart_farm_report(location, season, selected_crop, crop_confidence, yield_total, yield_confidence, weather_name, disease_name, disease_confidence, risk_level, health_score, final_score, priority, intelligence)
+    return {
+        "recommendations": top_recommendations,
+        "selected_crop": selected_crop,
+        "crop_confidence": crop_confidence,
+        "yield_per_acre": yield_per_acre,
+        "yield_total": yield_total,
+        "yield_confidence": yield_confidence,
+        "disease_name": disease_name,
+        "disease_confidence": disease_confidence,
+        "nutrient_state": nutrient_state,
+        "weather_name": weather_name,
+        "intelligence": intelligence,
+        "risk_score": risk_score,
+        "risk_level": risk_level,
+        "health_score": health_score,
+        "final_score": final_score,
+        "priority": priority,
+        "report": report,
+    }
+
+
+def build_openai_prompt(user_input, farm_data, report, intelligence):
+    return f"""
+You are an expert AI agriculture assistant helping Indian farmers.
+
+Farmer Details:
+Location: {farm_data['location']}
+Crop: {farm_data['crop']}
+Soil: {farm_data['soil']}
+Season: {farm_data['season']}
+Temperature: {farm_data['temperature']}
+Humidity: {farm_data['humidity']}
+Rainfall: {farm_data['rainfall']}
+Soil Moisture: {farm_data['soil_moisture']}
+NDVI: {farm_data['ndvi']}
+Disease Status: {report['disease']}
+Risk Level: {report['risk']}
+Health Score: {report['health_score']}
+Final Farm Score: {report['final_score']}
+Priority: {report['priority']}
+Suggested Irrigation: {intelligence['irrigation_level']}
+Suggested Fertilizer: {intelligence['fertilizer_level']}
+Priority Actions: {', '.join(report['actions'])}
+
+User Question:
+{user_input}
+
+Instructions:
+- Give friendly, simple answers.
+- Provide step-by-step guidance.
+- Use easy farmer-friendly language.
+- If priority is URGENT, say that clearly.
+- Keep it short, practical, and actionable.
+"""
+
+
+def farmer_chatbot(user_input, farm_data, report, intelligence):
+    if OpenAI is None:
+        return "OpenAI package is not installed. Run: pip install openai"
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    if not api_key:
+        return "OpenAI API key not found. Set OPENAI_API_KEY in your environment before using AI chat."
+    try:
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a smart farming assistant."},
+                {"role": "user", "content": build_openai_prompt(user_input, farm_data, report, intelligence)}
+            ],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"AI assistant error: {e}"
+
+
+def fallback_chatbot(user_input, report, intelligence, nutrient_state, ndvi_value):
+    q = user_input.lower().strip()
+    intro = f"🤖 Agri Vision AI Assistant: Crop is {report['crop']}, risk is {report['risk']}, farm priority is {report['priority']}, and health score is {report['health_score']}/100."
     if "what should i do" in q or "what to do" in q:
-        return f"{intro}\n\nRecommended actions: {', '.join(report['actions'])}. Main reason: disease status is {report['disease']} and NDVI is {ndvi_value:.2f}, so crop stress needs immediate management."
+        return f"{intro}\n\nDo these steps: {', '.join(report['actions'])}. Main reason is disease status {report['disease']} and NDVI {ndvi_value:.2f}."
     if "irrigation" in q or "water" in q:
         return f"{intro}\n\nIrrigation advice: {intelligence['irrigation_text']}"
     if "fertilizer" in q or "npk" in q:
         return f"{intro}\n\nFertilizer advice: {intelligence['fertilizer_text']} Nutrient condition is {nutrient_state}."
-    if "risk" in q:
-        return f"{intro}\n\nRisk is {report['risk']} because disease is {report['disease']} and crop health score is {report['health_score']}/100."
-    return f"{intro}\n\nSmart recommendation: {', '.join(report['actions'])}. Weather is {report['weather']} and disease status is {report['disease']}."
+    return f"{intro}\n\nPriority actions: {', '.join(report['actions'])}."
 
 
 def ensure_chat_history():
@@ -275,29 +379,85 @@ def ensure_chat_history():
     st.session_state.chat_history = cleaned
 
 
-def line_chart(values, labels, title, color):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=labels, y=values, mode="lines+markers", line=dict(color=color, width=3), marker=dict(size=8)))
-    fig.update_layout(title=title, height=300, margin=dict(l=20, r=20, t=50, b=20))
-    return fig
-
-
-def bar_chart(values, labels, title, color):
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=labels, y=values, marker_color=color))
-    fig.update_layout(title=title, height=300, margin=dict(l=20, r=20, t=50, b=20))
-    return fig
-
-
 def gauge_chart(value, title, color, max_value=100):
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=value, title={"text": title}, gauge={"axis": {"range": [0, max_value]}, "bar": {"color": color}}))
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value,
+        title={"text": title},
+        gauge={"axis": {"range": [0, max_value]}, "bar": {"color": color}}
+    ))
     fig.update_layout(height=260, margin=dict(l=20, r=20, t=50, b=20))
+    return fig
+
+
+def trend_chart(ndvi, soil_moisture):
+    weeks = ["Week 1", "Week 2", "Week 3", "Week 4"]
+    ndvi_series = [max(0.15, ndvi - 0.12), max(0.18, ndvi - 0.06), ndvi, min(1.0, ndvi + 0.03)]
+    moisture_series = [max(5, soil_moisture - 10), max(10, soil_moisture - 5), soil_moisture, min(100, soil_moisture + 4)]
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(
+        go.Scatter(x=weeks, y=ndvi_series, name="NDVI", mode="lines+markers", line=dict(color="#16a34a", width=3)),
+        secondary_y=False
+    )
+    fig.add_trace(
+        go.Scatter(x=weeks, y=moisture_series, name="Soil Moisture %", mode="lines+markers", line=dict(color="#2563eb", width=3)),
+        secondary_y=True
+    )
+    fig.update_layout(title="📊 Field Health Trend", height=340, legend=dict(orientation="h"))
+    fig.update_yaxes(title_text="NDVI", secondary_y=False)
+    fig.update_yaxes(title_text="Soil Moisture %", secondary_y=True)
+    return fig
+
+
+def yield_forecast_chart(yield_total):
+    stages = ["Current", "Next 10 Days", "Flowering", "Harvest"]
+    values = [round(yield_total * 0.72, 2), round(yield_total * 0.84, 2), round(yield_total * 0.92, 2), yield_total]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=stages,
+        y=values,
+        marker_color=["#93c5fd", "#60a5fa", "#3b82f6", "#1d4ed8"],
+        text=values,
+        textposition="outside"
+    ))
+    fig.update_layout(title="📈 Yield Forecast", height=340, yaxis_title="Tons")
+    return fig
+
+
+def nutrient_chart(nitrogen, phosphorus, potassium):
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=["Nitrogen", "Phosphorus", "Potassium"],
+        y=[nitrogen, phosphorus, potassium],
+        marker_color=["#22c55e", "#f59e0b", "#3b82f6"],
+        text=[nitrogen, phosphorus, potassium],
+        textposition="outside"
+    ))
+    fig.add_hline(y=50, line_dash="dash", line_color="red", annotation_text="Ideal safety line")
+    fig.update_layout(title="📉 Soil Nutrient Status", height=340, yaxis_title="Value")
+    return fig
+
+
+def confidence_chart(crop_conf, yield_conf, disease_conf):
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=[crop_conf, yield_conf, disease_conf, crop_conf],
+        theta=["Crop", "Yield", "Disease", "Crop"],
+        fill="toself",
+        line=dict(color="#7c3aed", width=3)
+    ))
+    fig.update_layout(
+        title="🎯 Prediction Confidence",
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        height=340
+    )
     return fig
 
 
 def main():
     st.title(APP_NAME)
-    st.caption("Integrated Telangana smart farming platform with connected predictions, smart farm report, dashboards, and AI assistant.")
+    st.caption("One-click integrated Telangana smart farming app with crop, yield, disease, irrigation, fertilizer, risk, health, and AI assistant in one workflow.")
 
     with st.sidebar:
         st.header("Farm Setup")
@@ -339,106 +499,131 @@ def main():
         phosphorus = st.slider("Phosphorus (P)", 0, 120, p_default, 1)
         potassium = st.slider("Potassium (K)", 0, 140, k_default, 1)
         ndvi = st.slider("NDVI", 0.0, 1.0, ndvi_default, 0.01)
+        run_all = st.button("🚀 Predict All Modules - One Click", use_container_width=True)
 
-    top_recommendations = recommend_crop(season, soil_type, temperature, humidity, rainfall, ph, nitrogen, phosphorus, potassium)
-    selected_crop = st.selectbox("Predicted / Selected Crop", [item["crop"] for item in top_recommendations])
-    crop_confidence = next(item["confidence"] for item in top_recommendations if item["crop"] == selected_crop)
-    yield_per_acre, yield_total, yield_confidence = predict_yield(selected_crop, area, rainfall, temperature, soil_moisture, nitrogen, phosphorus, potassium)
-    disease_name, disease_confidence = predict_disease(selected_crop, ndvi, humidity, soil_moisture)
-    nutrient_state = nutrient_health(nitrogen, phosphorus, potassium)
-    weather_name = weather_label(rainfall, humidity)
-    intelligence = build_intelligence_layer(selected_crop, disease_name, ndvi, soil_moisture, rainfall, temperature, nitrogen, phosphorus, potassium)
-    risk_score, risk_level, health_score = calculate_risk_and_health(disease_name, ndvi, soil_moisture, nutrient_state)
-    report = build_smart_farm_report(location, season, selected_crop, crop_confidence, yield_total, yield_confidence, weather_name, disease_name, disease_confidence, risk_level, health_score, intelligence)
+    if "results" not in st.session_state:
+        st.session_state.results = None
+
+    if run_all:
+        st.session_state.results = predict_all_modules(
+            location, season, soil_type, area, temperature, humidity, rainfall,
+            soil_moisture, ph, nitrogen, phosphorus, potassium, ndvi
+        )
+
+    if st.session_state.results is None:
+        st.info("Enter farm details in the sidebar and click 'Predict All Modules - One Click' to generate the integrated farm report.")
+        return
+
+    results = st.session_state.results
+    report = results["report"]
+    intelligence = results["intelligence"]
 
     tabs = st.tabs(["🌾 Smart Farming", "👁 Crop Monitoring", "📊 Dashboard", "🤖 AI Assistant"])
 
     with tabs[0]:
-        st.subheader("🌾 SMART FARM REPORT")
+        st.subheader("🌾 ONE-CLICK SMART FARM REPORT")
         st.markdown(f"""
 ### 🌾 SMART FARM REPORT
+**Location:** {report['location']}  
+**Season:** {report['season']}  
 **Crop:** {report['crop']} ({report['crop_conf']}%)  
 **Yield:** {report['yield_total']} tons ({report['yield_conf']}%)  
 **Weather:** {report['weather']}  
 **Disease:** {report['disease']} ({report['disease_conf']}%)  
-
-**🔴 Risk Level:** {report['risk']}  
-**💚 Health Score:** {report['health_score']}/100
+**Risk Level:** {report['risk']}  
+**Health Score:** {report['health_score']}/100  
+**Final Farm Score:** {report['final_score']}/100  
+**Priority:** {report['priority']}
 """)
         st.markdown("**✅ Recommended Actions:**")
         for action in report["actions"]:
             st.write(f"- {action}")
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Crop Prediction", f"{report['crop']}", f"{report['crop_conf']}% confidence")
-        m2.metric("Disease Prediction", report['disease'], f"{report['disease_conf']}% confidence")
-        m3.metric("Risk Score", risk_score, report['risk'])
-        m4.metric("Health Score", health_score)
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Crop", report["crop"], f"{report['crop_conf']}%")
+        m2.metric("Yield", f"{report['yield_total']} tons", f"{report['yield_conf']}%")
+        m3.metric("Disease", report["disease"], f"{report['disease_conf']}%")
+        m4.metric("Risk Score", results["risk_score"], report["risk"])
+        m5.metric("Farm Priority", report["priority"], f"Score {report['final_score']}")
 
-        st.info(f"Intelligence Layer: irrigation = {intelligence['irrigation_level']}, fertilizer = {intelligence['fertilizer_level']}. Connected decision logic is active.")
+        st.success(f"Integrated decision complete. Irrigation: {intelligence['irrigation_level']} | Fertilizer: {intelligence['fertilizer_level']}")
 
     with tabs[1]:
-        st.subheader("👁 Crop Monitoring")
-        c1, c2 = st.columns(2)
-        c1.write(f"NDVI Status: {ndvi_status(ndvi)}")
-        c1.write(f"Weather Condition: {weather_name}")
-        c1.write(f"Nutrient Health: {nutrient_state}")
-        c2.write(f"Disease Status: {disease_name}")
-        c2.write(f"Irrigation Plan: {intelligence['irrigation_text']}")
-        c2.write(f"Fertilizer Plan: {intelligence['fertilizer_text']}")
-
-        recommendation_table = []
-        for item in top_recommendations:
-            recommendation_table.append({
-                "Crop": item["crop"],
-                "Score": item["score"],
-                "Confidence %": item["confidence"],
-            })
-        st.dataframe(recommendation_table, use_container_width=True)
+        st.subheader("👁 Combined Monitoring")
+        left, right = st.columns(2)
+        left.write(f"Top crop recommendations: {', '.join([item['crop'] for item in results['recommendations']])}")
+        left.write(f"NDVI status: {ndvi_status(ndvi)}")
+        left.write(f"Nutrient health: {results['nutrient_state']}")
+        left.write(f"Weather condition: {results['weather_name']}")
+        right.write(f"Disease status: {results['disease_name']}")
+        right.write(f"Irrigation plan: {intelligence['irrigation_text']}")
+        right.write(f"Fertilizer plan: {intelligence['fertilizer_text']}")
+        right.write(f"Yield per acre: {results['yield_per_acre']} tons")
+        st.dataframe(results["recommendations"], use_container_width=True)
 
     with tabs[2]:
-        st.subheader("📊 Visual Dashboard")
-        ndvi_series = [max(0.1, ndvi - 0.12), max(0.1, ndvi - 0.06), ndvi, min(1.0, ndvi + 0.04)]
-        yield_series = [round(yield_total * 0.70, 2), round(yield_total * 0.84, 2), round(yield_total * 0.93, 2), yield_total]
-        nutrient_values = [nitrogen, phosphorus, potassium]
+        st.subheader("📊 Advanced Combined Dashboard")
+        r1, r2 = st.columns(2)
+        r1.plotly_chart(trend_chart(ndvi, soil_moisture), use_container_width=True)
+        r2.plotly_chart(yield_forecast_chart(results["yield_total"]), use_container_width=True)
 
-        d1, d2 = st.columns(2)
-        d1.plotly_chart(line_chart(ndvi_series, ["Week 1", "Week 2", "Week 3", "Week 4"], "📊 NDVI Graph", "green"), use_container_width=True)
-        d2.plotly_chart(line_chart(yield_series, ["Stage 1", "Stage 2", "Stage 3", "Final"], "📈 Yield Prediction Graph", "royalblue"), use_container_width=True)
+        r3, r4 = st.columns(2)
+        r3.plotly_chart(nutrient_chart(nitrogen, phosphorus, potassium), use_container_width=True)
+        r4.plotly_chart(confidence_chart(results["crop_confidence"], results["yield_confidence"], results["disease_confidence"]), use_container_width=True)
 
-        d3, d4 = st.columns(2)
-        d3.plotly_chart(bar_chart(nutrient_values, ["Nitrogen", "Phosphorus", "Potassium"], "📉 Soil Nutrients", ["#16a34a", "#f59e0b", "#2563eb"]), use_container_width=True)
-        d4.plotly_chart(gauge_chart(health_score, "Farm Health Score", "#dc2626" if risk_level == "HIGH" else "#f59e0b" if risk_level == "MEDIUM" else "#16a34a"), use_container_width=True)
+        r5, r6 = st.columns(2)
+        r5.plotly_chart(
+            gauge_chart(
+                results["health_score"],
+                "Farm Health Score",
+                "#dc2626" if results["risk_level"] == "HIGH" else "#f59e0b" if results["risk_level"] == "MEDIUM" else "#16a34a"
+            ),
+            use_container_width=True
+        )
+        r6.plotly_chart(
+            gauge_chart(results["final_score"], "Final Combined Farm Score", "#2563eb", 100),
+            use_container_width=True
+        )
 
     with tabs[3]:
         st.subheader("🤖 AI Assistant")
         ensure_chat_history()
-        user_q = st.text_input("Ask: What should I do? irrigation? fertilizer? risk? disease?")
+        st.caption("For real AI answers, set OPENAI_API_KEY in your environment.")
+        user_input = st.text_input("Ask your farming question")
         col1, col2 = st.columns(2)
-        ask = col1.button("Ask AI")
+        ask_ai = col1.button("Ask AI")
         clear = col2.button("Clear Chat")
 
         if clear:
             st.session_state.chat_history = []
 
-        if ask and user_q.strip():
-            answer = build_chatbot_reply(user_q, report, intelligence, ndvi, nutrient_state)
-            st.session_state.chat_history.append({"question": user_q, "answer": answer})
+        if ask_ai and user_input.strip():
+            farm_data = {
+                "location": report["location"],
+                "crop": report["crop"],
+                "soil": soil_type,
+                "season": report["season"],
+                "temperature": temperature,
+                "humidity": humidity,
+                "rainfall": rainfall,
+                "soil_moisture": soil_moisture,
+                "ndvi": ndvi,
+            }
+            if os.getenv("OPENAI_API_KEY") and OpenAI is not None:
+                answer = farmer_chatbot(user_input, farm_data, report, intelligence)
+            else:
+                answer = fallback_chatbot(user_input, report, intelligence, results["nutrient_state"], ndvi)
+
+            st.session_state.chat_history.append({
+                "question": user_input,
+                "answer": answer,
+                "time": datetime.now().strftime("%H:%M")
+            })
 
         for item in reversed(st.session_state.chat_history):
-            st.markdown(f"**Farmer:** {item['question']}")
+            st.markdown(f"**Farmer ({item.get('time', '')}):** {item['question']}")
             st.markdown(item["answer"])
             st.markdown("---")
-
-    st.markdown("### Added features")
-    st.write("1. Smart Farm Report")
-    st.write("2. Intelligence Layer connecting disease, irrigation, and fertilizer")
-    st.write("3. Risk Score and Health Score")
-    st.write("4. NDVI, Yield, and Soil Nutrient dashboard charts")
-    st.write("5. Location and Season aware predictions")
-    st.write("6. Real Farm Simulation Mode")
-    st.write("7. Smarter AI assistant using model outputs as context")
-    st.write("8. Confidence scores for crop, disease, and yield")
 
 
 if __name__ == "__main__":
