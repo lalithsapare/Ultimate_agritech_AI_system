@@ -16,6 +16,12 @@ except Exception:
     TF_AVAILABLE = False
 
 
+# =========================
+# GEMINI API KEY
+# =========================
+GEMINI_API_KEY = "AIzaSyDRXgSxLK1hgvciYqCchUdW9b1FAQjBH9o"
+
+
 st.set_page_config(
     page_title="AgriVision AI",
     page_icon="🌾",
@@ -464,11 +470,16 @@ if "season" not in st.session_state:
 
 def get_gemini_api_key():
     try:
-        if "GEMINI_API_KEY = AIzaSyDRXgSxLK1hgvciYqCchUdW9b1FAQjBH9o" in st.secrets:
-            return st.secrets["GEMINI_API_KEY = AIzaSyDRXgSxLK1hgvciYqCchUdW9b1FAQjBH9o"]
+        if "GEMINI_API_KEY" in st.secrets:
+            return st.secrets["GEMINI_API_KEY"]
     except Exception:
         pass
-    return os.getenv("GEMINI_API_KEY = AIzaSyDRXgSxLK1hgvciYqCchUdW9b1FAQjBH9o", "").strip()
+
+    env_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if env_key:
+        return env_key
+
+    return GEMINI_API_KEY.strip()
 
 
 def get_gemini_reply(user_text, farm_data, district, season):
@@ -765,6 +776,9 @@ elif page == "AI Assistant":
 
     st.markdown(f"<div class='chat-toolbar'>{toolbar_text}</div>", unsafe_allow_html=True)
 
+    # DEBUG KEY LINE ADDED HERE
+    st.write("DEBUG KEY:", get_gemini_api_key())
+
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
@@ -784,7 +798,7 @@ elif page == "AI Assistant":
                     st.session_state.season
                 )
                 st.markdown(reply)
-                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                st.session_state.chat_history.append({"role": "assistant", "content": reply)
 
 
 st.markdown("---")
