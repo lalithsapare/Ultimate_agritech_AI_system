@@ -2,289 +2,334 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from datetime import datetime
 
 st.set_page_config(
-    page_title="Agri Vision AI",
+    page_title="Farm Health AI Dashboard",
     page_icon="🌾",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# ---------- Theme / Styling ----------
 st.markdown("""
 <style>
-:root {
-    --bg: #0b1220;
-    --panel: rgba(17, 25, 40, 0.82);
-    --panel-2: rgba(15, 23, 42, 0.92);
-    --border: rgba(148, 163, 184, 0.18);
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --accent: #14b8a6;
-    --success: #22c55e;
-    --danger: #ef4444;
-    --warning: #f59e0b;
+.block-container {
+    padding-top: 1.2rem;
+    padding-bottom: 1rem;
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
 }
-
-.stApp {
-    background: radial-gradient(circle at top left, #123b33 0%, #0b1220 35%, #020617 100%);
-    color: var(--text);
+.main-title {
+    font-size: 2.2rem;
+    font-weight: 800;
+    color: #2e7d32;
+    margin-bottom: 0rem;
 }
-
-.main .block-container {
-    padding-top: 1rem;
-    padding-bottom: 2rem;
-    max-width: 1450px;
+.sub-title {
+    font-size: 0.95rem;
+    color: #6b7280;
+    margin-top: -0.3rem;
+    margin-bottom: 1rem;
 }
-
-h1, h2, h3 {
-    color: #dffcf6 !important;
+.card {
+    background: #ffffff;
+    padding: 1rem 1rem;
+    border-radius: 16px;
+    box-shadow: 0 1px 10px rgba(0,0,0,0.06);
+    border: 1px solid #edf2e9;
 }
-
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #07111f 0%, #0b1220 100%);
-}
-
-[data-testid="stMetric"] {
-    background: linear-gradient(135deg, rgba(20, 184, 166, 0.16), rgba(15, 23, 42, 0.95));
-    border: 1px solid var(--border);
-    padding: 18px;
-    border-radius: 20px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.22);
-}
-
-[data-testid="stMetricLabel"], [data-testid="stMetricValue"], [data-testid="stMetricDelta"] {
-    color: #ecfeff !important;
-}
-
-div[data-testid="stPlotlyChart"] {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 22px;
-    padding: 8px;
-    backdrop-filter: blur(12px);
-    box-shadow: 0 12px 28px rgba(0,0,0,0.18);
-}
-
-[data-testid="stChatMessage"] {
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    padding: 8px 10px;
-    margin-bottom: 10px;
-}
-
-.hero {
-    background: linear-gradient(135deg, rgba(20,184,166,0.16), rgba(34,197,94,0.10), rgba(15,23,42,0.95));
-    border: 1px solid rgba(148,163,184,0.16);
-    border-radius: 24px;
-    padding: 20px 22px;
-    margin-bottom: 16px;
-    box-shadow: 0 15px 40px rgba(0,0,0,0.22);
-}
-
-.caption-pill {
-    display:inline-block;
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: rgba(20,184,166,0.14);
-    color: #99f6e4;
-    border: 1px solid rgba(45,212,191,0.18);
+.metric-title {
     font-size: 0.85rem;
-    margin-bottom: 10px;
-}
-
-.subtitle {
-    color: #cbd5e1;
-    font-size: 1.15rem;
+    color: #6b7280;
     font-weight: 600;
-    margin-top: -8px;
-    margin-bottom: 8px;
+}
+.metric-value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #111827;
+}
+.metric-delta-up {
+    color: #2e7d32;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.metric-delta-down {
+    color: #c62828;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.metric-delta-neutral {
+    color: #b26a00;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.section-head {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-top: 0.5rem;
+    margin-bottom: 0.6rem;
+    color: #1f2937;
+}
+.small-note {
+    color: #6b7280;
+    font-size: 0.85rem;
+}
+.badge-green {
+    background-color: #e8f5e9;
+    color: #2e7d32;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+.badge-red {
+    background-color: #ffebee;
+    color: #c62828;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+.badge-orange {
+    background-color: #fff3e0;
+    color: #ef6c00;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+div[data-testid="stMetric"] {
+    background: white;
+    border: 1px solid #edf2e9;
+    padding: 12px 14px;
+    border-radius: 16px;
+    box-shadow: 0 1px 10px rgba(0,0,0,0.05);
 }
 </style>
 """, unsafe_allow_html=True)
 
-st.sidebar.title("🌾 Agri Vision AI Modules")
-selected_module = st.sidebar.radio(
-    "Choose Module",
-    [
-        "Dashboard",
-        "NDVI Analysis",
-        "Weather vs Yield",
-        "Soil NPK",
-        "Risk Gauge",
-        "Smart Alerts",
-        "Recommendations",
-        "Chatbot"
-    ]
-)
+# ---------- Sidebar ----------
+with st.sidebar:
+    st.markdown("## 🌾 Agri Vision AI")
+    st.caption("Farm Health Dashboard")
+    st.markdown("---")
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("⚙ Control Center")
-crop = st.sidebar.selectbox("Select Crop", ["Sesame", "Paddy", "Maize", "Cotton"])
-health_score = st.sidebar.slider("Health Score", 0, 100, 10)
-moisture = st.sidebar.slider("Soil Moisture (%)", 0, 100, 24)
-ndvi = st.sidebar.slider("Current NDVI", 0.0, 1.0, 0.35, 0.01)
-risk_level = "HIGH" if health_score < 30 else "MEDIUM" if health_score < 70 else "LOW"
-last_refresh = datetime.now().strftime("%d %b %Y, %I:%M %p")
+    page = st.radio(
+        "Navigation",
+        [
+            "Dashboard",
+            "Crop Monitor",
+            "Soil Analysis",
+            "Weather Intel",
+            "Disease Detection",
+            "Yield Prediction",
+            "Alert Center",
+            "Reports",
+            "Settings",
+        ],
+    )
 
-ndvi_data = pd.DataFrame({
-    "Days": list(range(1, 11)),
-    "NDVI": [0.60, 0.58, 0.55, 0.50, 0.45, 0.42, 0.40, 0.39, 0.38, ndvi]
+    st.markdown("---")
+    st.markdown("### Farm Filters")
+    farm_name = st.selectbox("Farm", ["Hyderabad Demo Farm", "Ranga Reddy Farm", "Medchal Farm"])
+    crop_type = st.selectbox("Crop", ["Rice", "Maize", "Tomato", "Cotton", "Chilli"])
+    season = st.selectbox("Season", ["Kharif", "Rabi", "Summer"])
+    st.markdown("---")
+    st.success("AI Models Active")
+
+# ---------- Mock Data ----------
+trend_df = pd.DataFrame({
+    "Day": [f"Day {i}" for i in range(1, 31)],
+    "Health Index": [72, 74, 73, 75, 77, 76, 78, 79, 80, 78, 81, 83, 82, 84, 85, 86, 84, 87, 88, 89, 87, 90, 91, 89, 92, 93, 91, 94, 95, 96]
 })
 
-weather_yield = pd.DataFrame({
-    "Rainfall": [50, 80, 100, 120, 140],
-    "Yield": [10, 15, 20, 23, 25]
+zone_df = pd.DataFrame({
+    "Zone": ["Healthy", "Moderate Stress", "High Risk", "Critical"],
+    "Value": [52, 28, 14, 6]
 })
 
-npk = pd.DataFrame({
-    "Nutrient": ["Nitrogen", "Phosphorus", "Potassium"],
-    "Value": [42, 22, 24]
+alerts_df = pd.DataFrame({
+    "Field / Zone": ["Zone A - Block 3", "Zone B - Block 1", "Zone C - Block 2", "Zone D - Block 5"],
+    "Issue Detected": ["Leaf Blight (Alternaria)", "Nitrogen Deficiency", "Aphid Infestation", "Overwatering Detected"],
+    "Severity": ["Critical", "Warning", "Warning", "Stable"],
+    "AI Confidence": ["94.2%", "87.8%", "79.3%", "91.0%"],
+    "Detected": ["2 hrs ago", "5 hrs ago", "1 day ago", "2 days ago"]
 })
 
-fig_ndvi = px.line(ndvi_data, x="Days", y="NDVI", title="NDVI Trend (Crop Health)", markers=True)
-fig_ndvi.update_traces(line_color="#14b8a6", marker=dict(size=8))
-fig_ndvi.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+pred_df = pd.DataFrame({
+    "Crop": ["Rice", "Maize", "Tomato"],
+    "Forecast": ["Healthy growth", "Moderate stress", "High disease risk"],
+    "Confidence": [96, 73, 88]
+})
 
-fig_weather = px.scatter(
-    weather_yield,
-    x="Rainfall",
-    y="Yield",
-    size="Yield",
-    color="Yield",
-    title="Yield vs Rainfall",
-    color_continuous_scale="Viridis",
-)
-fig_weather.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+soil_df = pd.DataFrame({
+    "Nutrient": ["Nitrogen (N)", "Phosphorus (P)", "Potassium (K)", "pH Level", "Organic Carbon"],
+    "Level": [72, 45, 88, 64, 22],
+    "Value": ["72 kg/ha", "45 kg/ha", "88 kg/ha", "6.4 (Optimal)", "22%"]
+})
 
-fig_npk = px.bar(
-    npk,
-    x="Nutrient",
-    y="Value",
-    color="Nutrient",
-    title="Soil Nutrient Levels",
-    color_discrete_sequence=["#22c55e", "#eab308", "#3b82f6"],
-)
-fig_npk.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+# ---------- Header ----------
+st.markdown('<div class="main-title">Agri Vision AI</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-title">Real-time crop intelligence and farm health monitoring dashboard</div>', unsafe_allow_html=True)
 
-fig_gauge = go.Figure(go.Indicator(
-    mode="gauge+number",
-    value=health_score,
-    title={'text': "Health Score"},
-    gauge={
-        'axis': {'range': [0, 100]},
-        'bar': {'color': "#ef4444" if health_score < 30 else "#f59e0b" if health_score < 70 else "#22c55e"},
-        'steps': [
-            {'range': [0, 30], 'color': 'rgba(239,68,68,0.35)'},
-            {'range': [30, 70], 'color': 'rgba(245,158,11,0.35)'},
-            {'range': [70, 100], 'color': 'rgba(34,197,94,0.35)'}
-        ]
-    }
-))
-fig_gauge.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+top_a, top_b, top_c = st.columns([2, 1, 1])
+with top_a:
+    st.markdown(f"**Farm:** {farm_name}  |  **Crop:** {crop_type}  |  **Season:** {season}")
+with top_b:
+    st.markdown('<span class="badge-green">AI Active</span>', unsafe_allow_html=True)
+with top_c:
+    st.markdown("**Location:** Hyderabad")
 
-if "chat_history" not in st.session_state or not isinstance(st.session_state.chat_history, list):
-    st.session_state.chat_history = []
+# ---------- Pages ----------
+if page == "Dashboard":
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Crop Health Score", "87.4%", "+3.2%")
+    m2.metric("Active Alerts", "7", "+2")
+    m3.metric("Yield Forecast", "4.2 t/ha", "+8.5%")
+    m4.metric("Soil Moisture", "62%", "Optimal")
 
-if not st.session_state.chat_history:
-    st.session_state.chat_history.append({
-        "role": "assistant",
-        "message": f"Hello! I am your farm assistant. Current crop is {crop}, health score is {health_score}/100, and risk level is {risk_level}."
-    })
+    st.markdown("### Farm Health Analytics")
 
-st.markdown(f"""
-<div class='hero'>
-    <div class='caption-pill'>LIVE FARM MONITORING</div>
-    <h1>🌾 Agri Vision AI</h1>
-    <div class='subtitle'>Farm Health AI Dashboard</div>
-    <p style='color:#cbd5e1; font-size:1rem;'>Premium AI dashboard for crop health, soil diagnostics, weather relationship, risk analytics, and smart recommendations. Latest dashboard status refresh: <b>{last_refresh}</b>.</p>
-</div>
-""", unsafe_allow_html=True)
+    c1, c2 = st.columns([2, 1])
 
-if selected_module == "Dashboard":
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🌱 Crop", crop)
-    col2.metric("📊 Health Score", f"{health_score}/100", delta=f"{health_score-90}")
-    col3.metric("⚠ Risk Level", risk_level)
-    col4.metric("💧 Soil Moisture", f"{moisture}%")
+    with c1:
+        fig_line = px.line(
+            trend_df,
+            x="Day",
+            y="Health Index",
+            markers=False,
+            title="Crop Health Trend - Last 30 Days"
+        )
+        fig_line.update_traces(line=dict(color="#2e7d32", width=3))
+        fig_line.update_layout(
+            height=360,
+            template="plotly_white",
+            margin=dict(l=10, r=10, t=50, b=10),
+            title_font=dict(size=18),
+        )
+        st.plotly_chart(fig_line, use_container_width=True)
 
-    row1_col1, row1_col2 = st.columns([1.5, 1])
-    with row1_col1:
-        st.plotly_chart(fig_ndvi, use_container_width=True)
-    with row1_col2:
-        st.plotly_chart(fig_gauge, use_container_width=True)
+    with c2:
+        fig_pie = px.pie(
+            zone_df,
+            names="Zone",
+            values="Value",
+            hole=0.6,
+            title="Zone Distribution",
+            color="Zone",
+            color_discrete_map={
+                "Healthy": "#43a047",
+                "Moderate Stress": "#fb8c00",
+                "High Risk": "#ef5350",
+                "Critical": "#b71c1c"
+            }
+        )
+        fig_pie.update_layout(
+            height=360,
+            template="plotly_white",
+            margin=dict(l=10, r=10, t=50, b=10),
+            title_font=dict(size=18),
+            legend_title_text=""
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-    row2_col1, row2_col2 = st.columns(2)
-    with row2_col1:
-        st.plotly_chart(fig_weather, use_container_width=True)
-    with row2_col2:
-        st.plotly_chart(fig_npk, use_container_width=True)
-
-elif selected_module == "NDVI Analysis":
-    st.subheader("🌿 NDVI Analysis")
-    st.plotly_chart(fig_ndvi, use_container_width=True)
-    st.info(f"Current NDVI is {ndvi:.2f}. Lower values indicate reduced crop vigor.")
-
-elif selected_module == "Weather vs Yield":
-    st.subheader("🌦 Weather vs Yield")
-    st.plotly_chart(fig_weather, use_container_width=True)
-    st.info("This graph helps analyze how rainfall variations may influence crop yield.")
-
-elif selected_module == "Soil NPK":
-    st.subheader("🧪 Soil Nutrient Analysis")
-    st.plotly_chart(fig_npk, use_container_width=True)
-    st.info("Nitrogen is higher than phosphorus and potassium, so balanced nutrient planning is needed.")
-
-elif selected_module == "Risk Gauge":
-    st.subheader("🔥 Health Risk Gauge")
-    st.plotly_chart(fig_gauge, use_container_width=True)
-    st.info(f"Current farm risk level is {risk_level} based on health score conditions.")
-
-elif selected_module == "Smart Alerts":
-    st.subheader("🚨 Smart Alerts")
-    if health_score < 30:
-        st.error("🚨 High Risk: Immediate action required")
-    if moisture < 30:
-        st.warning("⚠ Soil moisture low - irrigation needed")
-    if ndvi < 0.4:
-        st.warning("⚠ Crop stress detected")
-    if health_score >= 70 and moisture >= 40 and ndvi >= 0.6:
-        st.success("✅ Crop health looks stable and field conditions are favorable")
-
-elif selected_module == "Recommendations":
-    st.subheader("📋 Recommendations")
-    recommendations = [
-        "Increase irrigation frequency if soil moisture remains below 30%.",
-        "Inspect leaves for visible stress symptoms because NDVI is trending down.",
-        "Improve nutrient planning with follow-up soil testing for phosphorus and potassium.",
-        "Track dashboard values daily to compare recovery after intervention."
-    ]
-    for item in recommendations:
-        st.markdown(f"- {item}")
-
-elif selected_module == "Chatbot":
-    st.subheader("🤖 AI Agronomy Chatbot")
-    user_input = st.chat_input("Ask about disease, irrigation, NPK, or crop stress...")
-
-    if user_input:
-        question = user_input.lower()
-        if "irrigation" in question or "water" in question:
-            answer = f"Soil moisture is {moisture}%. Start irrigation planning immediately." if moisture < 30 else f"Soil moisture is {moisture}%. Irrigation is moderate priority right now."
-        elif "ndvi" in question or "stress" in question:
-            answer = f"Current NDVI is {ndvi:.2f}. This indicates crop stress and likely reduced vigor." if ndvi < 0.4 else f"Current NDVI is {ndvi:.2f}. Crop greenness is within a safer range."
-        elif "npk" in question or "soil" in question:
-            answer = "Nitrogen is strongest at 42, while phosphorus and potassium are lower. Balanced fertilization and soil testing are recommended."
-        elif "risk" in question:
-            answer = f"Risk level is {risk_level}. The score combines crop health, soil moisture, and NDVI trend behavior."
+    st.markdown("### Active Field Alerts")
+    def color_severity(val):
+        if val == "Critical":
+            return "background-color: #ffebee; color: #c62828; font-weight: 700;"
+        elif val == "Warning":
+            return "background-color: #fff3e0; color: #ef6c00; font-weight: 700;"
         else:
-            answer = "Based on the dashboard, focus first on moisture management, regular field scouting, and correcting nutrient imbalance to improve crop health."
+            return "background-color: #e8f5e9; color: #2e7d32; font-weight: 700;"
 
-        st.session_state.chat_history.append({"role": "user", "message": user_input})
-        st.session_state.chat_history.append({"role": "assistant", "message": answer})
+    st.dataframe(
+        alerts_df.style.map(color_severity, subset=["Severity"]),
+        use_container_width=True,
+        hide_index=True
+    )
 
-    for chat in st.session_state.chat_history:
-        role = chat.get("role", "assistant")
-        message = chat.get("message", "")
-        with st.chat_message(role):
-            st.write(message)v
+    b1, b2 = st.columns(2)
+
+    with b1:
+        st.markdown("### AI Predictions")
+        for _, row in pred_df.iterrows():
+            st.markdown(f"**{row['Crop']}** — {row['Forecast']}")
+            st.progress(int(row["Confidence"]))
+            st.caption(f"Confidence: {row['Confidence']}%")
+
+    with b2:
+        st.markdown("### Soil Nutrient Levels")
+        for _, row in soil_df.iterrows():
+            st.write(f"**{row['Nutrient']}** — {row['Value']}")
+            st.progress(int(row["Level"]))
+
+elif page == "Crop Monitor":
+    st.markdown("## Crop Monitor")
+    st.info("Track crop growth, canopy vigor, NDVI patterns, and field-level health conditions.")
+    crop_health = pd.DataFrame({
+        "Zone": ["A", "B", "C", "D", "E"],
+        "Health Score": [92, 78, 70, 88, 81]
+    })
+    fig = px.bar(crop_health, x="Zone", y="Health Score", color="Health Score",
+                 color_continuous_scale="Greens", title="Zone-wise Crop Health")
+    st.plotly_chart(fig, use_container_width=True)
+
+elif page == "Soil Analysis":
+    st.markdown("## Soil Analysis")
+    st.info("Analyze nutrient levels, pH balance, organic carbon, and fertilizer recommendations.")
+    fig = go.Figure(go.Scatterpolar(
+        r=[72, 45, 88, 64, 22],
+        theta=["Nitrogen", "Phosphorus", "Potassium", "pH", "Organic Carbon"],
+        fill='toself',
+        line_color="#2e7d32"
+    ))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True)), height=500, title="Soil Health Radar")
+    st.plotly_chart(fig, use_container_width=True)
+
+elif page == "Weather Intel":
+    st.markdown("## Weather Intel")
+    st.info("Monitor temperature, humidity, rainfall, and irrigation planning indicators.")
+    weather_df = pd.DataFrame({
+        "Day": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "Temp": [31, 32, 34, 33, 30, 29, 31],
+        "Rainfall": [0, 2, 5, 1, 0, 12, 3]
+    })
+    fig = px.line(weather_df, x="Day", y=["Temp", "Rainfall"], markers=True, title="7-Day Weather Signals")
+    st.plotly_chart(fig, use_container_width=True)
+
+elif page == "Disease Detection":
+    st.markdown("## Disease Detection")
+    st.warning("Upload crop leaf images and run CNN-based disease classification.")
+    uploaded_file = st.file_uploader("Upload crop image", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        st.image(uploaded_file, caption="Uploaded Crop Image", use_container_width=True)
+        st.success("Prediction: Leaf Blight detected with 94.2% confidence.")
+
+elif page == "Yield Prediction":
+    st.markdown("## Yield Prediction")
+    st.info("Forecast expected yield using crop, weather, and soil features.")
+    area = st.number_input("Farm area (acres)", min_value=1.0, value=5.0)
+    ndvi = st.slider("Average NDVI", 0.0, 1.0, 0.72)
+    moisture = st.slider("Soil Moisture (%)", 0, 100, 62)
+    if st.button("Predict Yield"):
+        pred = round((area * ndvi * moisture) / 8.5, 2)
+        st.success(f"Estimated Yield Forecast: {pred} tons")
+
+elif page == "Alert Center":
+    st.markdown("## Alert Center")
+    st.error("Critical and warning alerts are listed below.")
+    st.dataframe(alerts_df, use_container_width=True, hide_index=True)
+
+elif page == "Reports":
+    st.markdown("## Reports")
+    st.info("Download and review weekly or monthly AI farm reports.")
+    csv = alerts_df.to_csv(index=False).encode("utf-8")
+    st.download_button("Download Alerts Report CSV", data=csv, file_name="farm_alerts_report.csv", mime="text/csv")
+
+elif page == "Settings":
+    st.markdown("## Settings")
+    st.text_input("Farm Name", value=farm_name)
+    st.selectbox("Preferred Alert Mode", ["SMS", "Email", "Dashboard Only"])
+    st.slider("Critical Alert Threshold", 50, 100, 80)
+    st.checkbox("Enable AI Recommendations", value=True)
+    st.button("Save Settings")
