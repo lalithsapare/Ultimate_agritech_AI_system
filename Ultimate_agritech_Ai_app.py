@@ -56,6 +56,45 @@ TELANGANA_CROP_INFO = {
     "Black Gram": {"season": "Rabi", "water": "Low to Moderate", "note": "Good pulse option after monsoon."},
 }
 
+HARVEST_INFO = {
+    "Cotton": {"days": 165, "stage": "Picking stage starts after boll opening", "water": "Moderate", "labor": "Medium to High", "market": "Check kapas rate before harvest"},
+    "Maize": {"days": 115, "stage": "Harvest at black layer maturity", "water": "Moderate", "labor": "Medium", "market": "Dry cobs before storage"},
+    "Paddy": {"days": 135, "stage": "Harvest when 80 to 85 percent grains mature", "water": "High", "labor": "High", "market": "Plan drying yard and transport"},
+    "Red Gram": {"days": 150, "stage": "Harvest when pods turn brown and dry", "water": "Low to Moderate", "labor": "Medium", "market": "Avoid shattering losses"},
+    "Soybean": {"days": 105, "stage": "Harvest when leaves drop and pods dry", "water": "Moderate", "labor": "Medium", "market": "Dry seed well before bagging"},
+    "Turmeric": {"days": 240, "stage": "Harvest when leaves yellow and dry", "water": "High", "labor": "High", "market": "Curing and polishing needed"},
+    "Jowar": {"days": 115, "stage": "Harvest when grains become hard", "water": "Low", "labor": "Medium", "market": "Good option for dry belts"},
+    "Bengal Gram": {"days": 110, "stage": "Harvest when plants become dry", "water": "Low", "labor": "Low to Medium", "market": "Avoid excess moisture at harvest"},
+    "Groundnut": {"days": 115, "stage": "Harvest after inner shell darkening", "water": "Moderate", "labor": "Medium", "market": "Dry pods before storage"},
+    "Sesame": {"days": 95, "stage": "Harvest when lower capsules mature", "water": "Low", "labor": "Low", "market": "Tie bundles upright for drying"},
+    "Sunflower": {"days": 105, "stage": "Harvest when back of head turns yellow", "water": "Moderate", "labor": "Medium", "market": "Dry seed heads properly"},
+    "Black Gram": {"days": 85, "stage": "Harvest when most pods turn black", "water": "Low to Moderate", "labor": "Low to Medium", "market": "Do timely harvest to reduce shattering"},
+}
+
+UI_TEXT = {
+    "English": {
+        "weather_title": "Weather Module",
+        "harvest_title": "Harvest Time & Farm Requirements",
+        "farmer_note": "Easy farmer-friendly guidance is active.",
+        "lang_note": "Language selected"
+    },
+    "Telugu": {
+        "weather_title": "వాతావరణ మాడ్యూల్",
+        "harvest_title": "పంట కోత సమయం మరియు అవసరాలు",
+        "farmer_note": "రైతులకు సులభంగా అర్థమయ్యే సూచనలు యాక్టివ్‌లో ఉన్నాయి.",
+        "lang_note": "ఎంచుకున్న భాష"
+    },
+    "Hindi": {
+        "weather_title": "मौसम मॉड्यूल",
+        "harvest_title": "कटाई समय और कृषि आवश्यकताएँ",
+        "farmer_note": "किसानों के लिए आसान मार्गदर्शन सक्रिय है।",
+        "lang_note": "चयनित भाषा"
+    }
+}
+
+def tr(language: str, key: str) -> str:
+    return UI_TEXT.get(language, UI_TEXT["English"]).get(key, key)
+
 class AgritechModels:
     def predict_crop_recommendation(self, features: List[float], location: str = "Telangana", season: str = "Kharif") -> Tuple[str, float, Dict[str, float]]:
         region_crops = {
@@ -315,6 +354,41 @@ def build_action_list(irrigation_action: str, fertilizer_action: str, disease: s
             final_actions.append(action)
     return final_actions[:6]
 
+def get_harvest_time(crop_name: str, season: str, location: str) -> Dict[str, object]:
+    info = HARVEST_INFO.get(crop_name, {"days": 120, "stage": "Harvest at maturity", "water": "Moderate", "labor": "Medium", "market": "Check local market demand"})
+    season_adjust = 5 if location == "Telangana" and season == "Rabi" else 0
+    total_days = info["days"] + season_adjust
+    return {
+        "days": total_days,
+        "stage": info["stage"],
+        "water": info["water"],
+        "labor": info["labor"],
+        "market": info["market"],
+    }
+
+def get_farmer_requirements(crop_name: str, irrigation: str, weather_type: str) -> Dict[str, str]:
+    base_tools = "Seeds, soil test, sprayer, fertilizer, labor planning"
+    if crop_name in ["Paddy", "Turmeric"]:
+        base_tools += ", strong water source"
+    if irrigation == "High":
+        irrigation_need = "Keep motor, drip or pipe system ready"
+    elif irrigation == "Moderate":
+        irrigation_need = "Use planned interval irrigation"
+    else:
+        irrigation_need = "Minimal irrigation; monitor field moisture"
+    if weather_type == "Wet & Humid":
+        weather_task = "Focus on drainage, disease scouting, and spray timing"
+    elif weather_type == "Hot & Dry":
+        weather_task = "Use mulch, frequent moisture checks, and heat protection"
+    else:
+        weather_task = "Normal field monitoring is enough"
+    return {
+        "Tools": base_tools,
+        "Irrigation Setup": irrigation_need,
+        "Weather Handling": weather_task,
+        "Farmer Tip": "Follow simple field observations every 2 to 3 days"
+    }
+
 def generate_smart_report(data: Dict[str, object]) -> str:
     risk_class = get_risk_class(data["risk"])
     actions_html = "".join([f"<li>{a}</li>" for a in data["actions"]])
@@ -325,6 +399,8 @@ def generate_smart_report(data: Dict[str, object]) -> str:
         <p><strong>Crop:</strong> {data['crop']} ({data['crop_conf']}%)</p>
         <p><strong>Weather:</strong> {data['weather']} ({data['weather_conf']}%) | <strong>Weather Type:</strong> {data['weather_class']} ({data['weather_class_conf']}%)</p>
         <p><strong>Predicted Temperature:</strong> {data['predicted_temperature']} °C ({data['temperature_conf']}%)</p>
+        <p><strong>Harvest Time:</strong> {data['harvest_days']} days | <strong>Harvest Stage:</strong> {data['harvest_stage']}</p>
+        <p><strong>Farmer Requirement:</strong> {data['farmer_tip']}</p>
         <p><strong>Disease:</strong> {data['disease']} ({data['disease_conf']}%)</p>
         <p><strong>Pest:</strong> {data['pest']} ({data['pest_conf']}%)</p>
         <p><strong>Nutrient Deficiency:</strong> {data['deficiency']} ({data['deficiency_conf']}%)</p>
@@ -411,14 +487,15 @@ def plot_nutrient_comparison(levels: Dict[str, float], ideal: Dict[str, float], 
     return fig
 
 st.sidebar.title("🌿 AgriTech Menu")
-page = st.sidebar.radio("Choose Module", ["Home", "Smart Advisor", "Crop Recommendation", "Crop Yield", "Irrigation", "Fertilizer", "Soil & NPK", "NDVI & Stress", "Image Models", "Farmer Chat Assistant"])
+page = st.sidebar.radio("Choose Module", ["Home", "Smart Advisor", "Weather Module", "Crop Recommendation", "Crop Yield", "Irrigation", "Fertilizer", "Soil & NPK", "NDVI & Stress", "Image Models", "Farmer Chat Assistant"])
+language = st.sidebar.selectbox("Language", ["English", "Telugu", "Hindi"], index=0)
 st.sidebar.markdown("### 🌍 Regional Simulation Mode")
 location = st.sidebar.selectbox("Location", ["Telangana", "Andhra Pradesh"], index=0)
 season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"], index=0)
 defaults = get_simulation_defaults(location, season)
 season_code = 1 if season == "Kharif" else 0
 
-st.markdown(f"""<div class="hero-box"><h1>🌾 AgriTech Smart Assistant Pro+ Telangana Edition</h1><p>Advanced agriculture dashboard with stronger Telangana crop optimization, clear visual analytics, and easy-to-understand predictions.</p><p><strong>Location:</strong> {location} | <strong>Season:</strong> {season}</p></div>""", unsafe_allow_html=True)
+st.markdown(f"""<div class="hero-box"><h1>🌾 AgriTech Smart Assistant Pro+ Telangana Edition</h1><p>Advanced agriculture dashboard with stronger Telangana crop optimization, clear visual analytics, and easy-to-understand predictions.</p><p><strong>Location:</strong> {location} | <strong>Season:</strong> {season}</p><p><strong>{tr(language, "lang_note")}:</strong> {language}</p><p>{tr(language, "farmer_note")}</p></div>""", unsafe_allow_html=True)
 
 if page == "Home":
     st.markdown(f'<span class="region-chip">{location}</span><span class="region-chip">{season}</span><span class="region-chip">{get_region_note(location, season)}</span>', unsafe_allow_html=True)
@@ -460,6 +537,8 @@ elif page == "Smart Advisor":
         weather_class, weather_class_conf, weather_class_factors = agrimodels.predict_weather_class([temperature, humidity, rainfall, soil_moisture], location)
         fert_result, fert_conf, fert_levels = agrimodels.predict_fertilizer([N, P, K, temperature, humidity, soil_moisture, 1, 1, ph, rainfall], location, crop)
         yield_pred, yield_conf, yield_components = agrimodels.predict_crop_yield([ph, temperature, rainfall, fertilizer_val, humidity, soil_moisture], location)
+        harvest_info = get_harvest_time(crop, season, location)
+        farmer_requirements = get_farmer_requirements(crop, irrigation, weather_class)
         ndvi = agrimodels.calculate_ndvi(red, nir)
         stress_level, stress_conf, stress_factors = agrimodels.predict_crop_stress([ndvi, temperature, soil_moisture, humidity], location)
         disease_data = st.session_state.last_disease_output
@@ -484,6 +563,10 @@ elif page == "Smart Advisor":
             "weather_class_conf": weather_class_conf,
             "predicted_temperature": predicted_temperature,
             "temperature_conf": temperature_conf,
+            "harvest_days": harvest_info["days"],
+            "harvest_stage": harvest_info["stage"],
+            "farmer_tip": farmer_requirements["Farmer Tip"],
+            "farmer_requirements": farmer_requirements,
             "actions": actions,
             "yield": yield_pred,
             "yield_conf": yield_conf,
@@ -516,7 +599,15 @@ elif page == "Smart Advisor":
         m6.metric("Deficiency Confidence", f"{deficiency_conf}%")
         m7.metric("Weather Type", weather_class)
         m8.metric("Pred Temp", f"{predicted_temperature} °C")
-        tab1, tab2, tab3 = st.tabs(["🌾 Farming", "👁 Monitoring", "🤖 Assistant"])
+        st.markdown(f"### {tr(language, 'harvest_title')}")
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Harvest Days", harvest_info["days"])
+        r2.metric("Water Need", harvest_info["water"])
+        r3.metric("Labor Need", harvest_info["labor"])
+        r4.metric("Market Note", harvest_info["market"])
+        st.write("**Farmer Requirements**")
+        st.json(farmer_requirements)
+        tab1, tab2, tab3, tab4 = st.tabs(["🌾 Farming", "👁 Monitoring", "⛅ Weather", "🤖 Assistant"])
         with tab1:
             st.plotly_chart(plot_donut(crop_map, "Crop Recommendation Probability"), use_container_width=True)
             st.plotly_chart(plot_bar_dict(yield_components, "Yield Contribution Analysis"), use_container_width=True)
@@ -528,9 +619,52 @@ elif page == "Smart Advisor":
             st.plotly_chart(plot_bar_dict(weather_class_factors, "Weather Classification Inputs"), use_container_width=True)
             st.plotly_chart(plot_line_forecast(yield_pred, "7-Day Yield Trend Simulation", "Yield Index"), use_container_width=True)
         with tab3:
+            st.plotly_chart(plot_line_forecast(rain_value, "7-Day Rainfall Forecast", "Rainfall (mm)"), use_container_width=True)
+            st.plotly_chart(plot_line_forecast(predicted_temperature, "7-Day Temperature Forecast", "Temperature (°C)"), use_container_width=True)
+            weather_mix = {"Humidity": humidity, "Rainfall": rainfall, "Soil Moisture": soil_moisture, "Temperature": temperature}
+            st.plotly_chart(plot_radar(weather_mix, "Weather Field Condition Radar", 'rgba(59,130,246,0.22)'), use_container_width=True)
+        with tab4:
             answer, why = generate_gpt_like_reply("what should i do", st.session_state.latest_final_output, location, season)
             st.markdown(answer)
             st.markdown(why)
+
+elif page == "Weather Module":
+    st.subheader(f"⛅ {tr(language, 'weather_title')}")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        temp = num_input("Temperature", defaults["temperature"])
+        humidity = num_input("Humidity", defaults["humidity"])
+    with c2:
+        pressure = num_input("Pressure", 1012)
+        wind = num_input("Wind Speed", 8)
+    with c3:
+        rainfall = num_input("Rainfall", defaults["rainfall"])
+        soil_moisture = num_input("Soil Moisture", defaults["soil_moisture"])
+    if st.button("Predict Weather & Harvest"):
+        rain_value, weather_status, weather_conf, rain_factors = agrimodels.predict_rainfall([temp, humidity, pressure, wind], location)
+        pred_temp, temp_conf, temp_factors = agrimodels.predict_temperature([humidity, rainfall, soil_moisture, season_code], location)
+        weather_class, class_conf, class_factors = agrimodels.predict_weather_class([temp, humidity, rainfall, soil_moisture], location)
+        crop, crop_conf, _ = agrimodels.predict_crop_recommendation([defaults["N"], defaults["P"], defaults["K"], temp, humidity, defaults["ph"], rainfall], location, season)
+        harvest = get_harvest_time(crop, season, location)
+        farmer_req = get_farmer_requirements(crop, "Moderate", weather_class)
+        st.success(f"Weather: {weather_status} ({weather_conf}% confidence) | Type: {weather_class} ({class_conf}% confidence)")
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("Rainfall Forecast", f"{rain_value} mm")
+        a2.metric("Temperature Forecast", f"{pred_temp} °C")
+        a3.metric("Harvest Days", harvest["days"])
+        a4.metric("Suggested Crop", crop)
+        st.info(f"Harvest stage: {harvest['stage']}")
+        st.write("**Farmer-Friendly Requirements**")
+        st.json(farmer_req)
+        p1, p2 = st.columns(2)
+        with p1:
+            st.plotly_chart(plot_bar_dict(rain_factors, "Rainfall Factors"), use_container_width=True)
+            st.plotly_chart(plot_line_forecast(rain_value, "7-Day Rainfall Forecast", "Rainfall (mm)"), use_container_width=True)
+        with p2:
+            st.plotly_chart(plot_bar_dict(temp_factors, "Temperature Factors"), use_container_width=True)
+            st.plotly_chart(plot_line_forecast(pred_temp, "7-Day Temperature Forecast", "Temperature (°C)"), use_container_width=True)
+        weather_mix = {"Humidity": humidity, "Rainfall": rainfall, "Soil Moisture": soil_moisture, "Temperature": temp}
+        st.plotly_chart(plot_radar(weather_mix, "Weather Condition Radar", 'rgba(59,130,246,0.22)'), use_container_width=True)
 
 elif page == "Crop Recommendation":
     st.subheader("🌾 Telangana Crop Recommendation")
