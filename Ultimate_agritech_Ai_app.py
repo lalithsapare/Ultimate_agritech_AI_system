@@ -4,11 +4,24 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import joblib
-import tensorflow as tf
 
 from pathlib import Path
 from PIL import Image
 import streamlit as st
+
+
+# =========================
+# SAFE TENSORFLOW IMPORT
+# =========================
+TF_AVAILABLE = True
+tf = None
+TF_IMPORT_ERROR = None
+
+try:
+    import tensorflow as tf
+except Exception as e:
+    TF_AVAILABLE = False
+    TF_IMPORT_ERROR = str(e)
 
 
 # =========================
@@ -40,15 +53,16 @@ st.markdown("""
 
 
 # =========================
-# REAL MODEL LOADER
+# BASE MODEL CLASS
 # =========================
-class AgritechModels:
+class BaseAgritechModels:
     def __init__(self, model_path):
         self.model_path = Path(model_path)
         self.models = {}
         self.encoders = {}
         self.class_names = {}
         self.schemas = {}
+
         self._define_schemas()
         self._load_all_models()
 
@@ -74,7 +88,10 @@ class AgritechModels:
             "fertilizer_model": {
                 "file": "fertilizer_model.pkl",
                 "type": "tabular_classification",
-                "features": ["N", "P", "K", "temperature", "humidity", "moisture", "soil_type", "crop_type", "ph", "rainfall"],
+                "features": [
+                    "N", "P", "K", "temperature", "humidity",
+                    "moisture", "soil_type", "crop_type", "ph", "rainfall"
+                ],
                 "encoder": "fertilizer_encoder"
             },
             "temp_model": {
@@ -154,7 +171,10 @@ class AgritechModels:
     def _load_encoder_if_exists(self, key, filename):
         file_path = self.model_path / filename
         if file_path.exists():
-            self.encoders[key] = joblib.load(file_path)
+            try:
+                self.encoders[key] = joblib.load(file_path)
+            except Exception as e:
+                print(f"Encoder load error {filename}: {e}")
 
     def _load_all_models(self):
         self._load_encoder_if_exists("crop_encoder", "crop_label_encoder.pkl")
@@ -170,7 +190,11 @@ class AgritechModels:
 
             try:
                 if schema["file"].endswith(".h5"):
-                    self.models[key] = tf.keras.models.load_model(model_file)
+                    if TF_AVAILABLE and tf is not None:
+                        self.models[key] = tf.keras.models.load_model(model_file)
+                    else:
+                        print(f"Skipping DL model {schema['file']} because TensorFlow is unavailable")
+                        continue
                 else:
                     self.models[key] = joblib.load(model_file)
 
@@ -178,8 +202,9 @@ class AgritechModels:
                     cls_file = self.model_path / schema["classes_file"]
                     if cls_file.exists():
                         self.class_names[key] = joblib.load(cls_file)
+
             except Exception as e:
-                print(f"Error loading {schema['file']}: {e}")
+                print(f"Model load error {schema['file']}: {e}")
 
     def has_model(self, model_key):
         return model_key in self.models
@@ -243,7 +268,7 @@ class AgritechModels:
             return {
                 schema["outputs"][0]: float(vals[0]),
                 schema["outputs"][1]: float(vals[1]),
-                schema["outputs"][2]: float(vals[2]),
+                schema["outputs"][2]: float(vals[2])
             }
 
         if schema["type"] == "tabular_classification":
@@ -298,63 +323,40 @@ class AgritechModels:
             return 0.0
         return (nir - red) / (nir + red)
 
-    def predict_ndvi(self, x):
-        return self._predict_tabular(x, "ndvi_model")
+    def predict_ndvi(self, x): return self._predict_tabular(x, "ndvi_model")
+    def predict_crop_stress(self, x): return self._predict_tabular(x, "stress_model")
+    def predict_npk(self, x): return self._predict_tabular(x, "npk_model")
+    def predict_crop_recommendation(self, x): return self._predict_tabular(x, "crop_model")
+    def predict_crop_yield(self, x): return self._predict_tabular(x, "yield_model")
+    def predict_irrigation(self, x): return self._predict_tabular(x, "irrigation_model")
+    def predict_fertilizer(self, x): return self._predict_tabular(x, "fertilizer_model")
+    def predict_temperature(self, x): return self._predict_tabular(x, "temp_model")
+    def predict_rainfall(self, x): return self._predict_tabular(x, "rain_model")
+    def predict_humidity(self, x): return self._predict_tabular(x, "humidity_model")
+    def predict_ph(self, x): return self._predict_tabular(x, "ph_model")
+    def predict_price(self, x): return self._predict_tabular(x, "price_model")
+    def predict_harvest_time(self, x): return self._predict_tabular(x, "harvest_model")
 
-    def predict_crop_stress(self, x):
-        return self._predict_tabular(x, "stress_model")
-
-    def predict_npk(self, x):
-        return self._predict_tabular(x, "npk_model")
-
-    def predict_crop_recommendation(self, x):
-        return self._predict_tabular(x, "crop_model")
-
-    def predict_crop_yield(self, x):
-        return self._predict_tabular(x, "yield_model")
-
-    def predict_irrigation(self, x):
-        return self._predict_tabular(x, "irrigation_model")
-
-    def predict_fertilizer(self, x):
-        return self._predict_tabular(x, "fertilizer_model")
-
-    def predict_temperature(self, x):
-        return self._predict_tabular(x, "temp_model")
-
-    def predict_rainfall(self, x):
-        return self._predict_tabular(x, "rain_model")
-
-    def predict_humidity(self, x):
-        return self._predict_tabular(x, "humidity_model")
-
-    def predict_ph(self, x):
-        return self._predict_tabular(x, "ph_model")
-
-    def predict_price(self, x):
-        return self._predict_tabular(x, "price_model")
-
-    def predict_harvest_time(self, x):
-        return self._predict_tabular(x, "harvest_model")
-
-    def predict_disease(self, img):
-        return self._predict_image(img, "disease_model")
-
-    def predict_leaf(self, img):
-        return self._predict_image(img, "leaf_model")
-
-    def predict_weed(self, img):
-        return self._predict_image(img, "weed_model")
-
-    def predict_soil(self, img):
-        return self._predict_image(img, "soil_model")
-
-    def predict_nutrient(self, img):
-        return self._predict_image(img, "nutrient_model")
+    def predict_disease(self, img): return self._predict_image(img, "disease_model")
+    def predict_leaf(self, img): return self._predict_image(img, "leaf_model")
+    def predict_weed(self, img): return self._predict_image(img, "weed_model")
+    def predict_soil(self, img): return self._predict_image(img, "soil_model")
+    def predict_nutrient(self, img): return self._predict_image(img, "nutrient_model")
 
 
 # =========================
-# FALLBACK DEMO MODELS
+# SAME CLASS, DIFFERENT NAME
+# =========================
+class AgritechModels(BaseAgritechModels):
+    pass
+
+
+class UltimateAgritechModels(BaseAgritechModels):
+    pass
+
+
+# =========================
+# FALLBACK MODELS
 # =========================
 class TelanganaAgriModels:
     def __init__(self):
@@ -405,24 +407,25 @@ class TelanganaAgriModels:
 # =========================
 class HybridAgriModels:
     def __init__(self, model_dir="models"):
-        self.real_models = AgritechModels(model_dir)
+        self.agritech_models = AgritechModels(model_dir)
+        self.ultimateagritech_models = UltimateAgritechModels(model_dir)
         self.demo_models = TelanganaAgriModels()
 
     def predict_crop_recommendation(self, features, season="Kharif"):
-        if self.real_models.has_model("crop_model"):
-            result = self.real_models.predict_crop_recommendation(features)
-            return result, 95.0
+        if self.agritech_models.has_model("crop_model"):
+            result = self.agritech_models.predict_crop_recommendation(features)
+            return str(result), 95.0
         return self.demo_models.predict_crop_recommendation(features, season)
 
     def predict_crop_yield(self, features):
-        if self.real_models.has_model("yield_model"):
-            result = self.real_models.predict_crop_yield(features)
+        if self.agritech_models.has_model("yield_model"):
+            result = self.agritech_models.predict_crop_yield(features)
             return round(result, 2), 94.0
         return self.demo_models.predict_crop_yield(features)
 
     def predict_irrigation(self, features):
-        if self.real_models.has_model("irrigation_model"):
-            result = self.real_models.predict_irrigation(features)
+        if self.agritech_models.has_model("irrigation_model"):
+            result = self.agritech_models.predict_irrigation(features)
             action_map = {
                 "Low": "Skip irrigation cycle",
                 "Moderate": "Light irrigation",
@@ -441,8 +444,9 @@ class HybridAgriModels:
         return self.demo_models.predict_fertilizer(n, p, k)
 
     def predict_disease(self, arr):
-        if self.real_models.has_model("disease_model"):
-            return self.real_models.predict_disease(arr)
+        if self.agritech_models.has_model("disease_model"):
+            return self.agritech_models.predict_disease(arr)
+
         score = int(np.mean(arr)) % 4
         labels = ["Healthy", "Leaf Blight", "Rust", "Leaf Spot"]
         return {
@@ -460,13 +464,10 @@ agrimodels = HybridAgriModels("models")
 # =========================
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
 if "latest_farm_data" not in st.session_state:
     st.session_state.latest_farm_data = None
-
 if "district" not in st.session_state:
     st.session_state.district = "Hyderabad"
-
 if "season" not in st.session_state:
     st.session_state.season = "Kharif"
 
@@ -495,7 +496,6 @@ def get_gemini_reply(user_text, farm_data, district, season):
         model = genai.GenerativeModel("gemini-1.5-flash")
 
         farm_context = "No latest farm data available."
-
         if farm_data:
             farm_context = (
                 f"District: {district}. Season: {season}. Recommended crop: {farm_data.get('crop')}. "
@@ -506,6 +506,7 @@ def get_gemini_reply(user_text, farm_data, district, season):
 
         prompt = f"""
 You are AgriVision AI, a practical Telangana agriculture assistant.
+
 Answer in simple farmer-friendly language.
 
 Structure reply as:
@@ -588,6 +589,9 @@ st.sidebar.markdown("### Telangana Filters")
 st.session_state.district = st.sidebar.selectbox("District", ["Hyderabad", "Ranga Reddy", "Medchal", "Sangareddy", "Mahabubnagar"])
 st.session_state.season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"])
 
+if not TF_AVAILABLE:
+    st.sidebar.warning("TensorFlow not installed. DL .h5 models are skipped. ML .pkl models still work.")
+
 render_header()
 render_top_dashboard()
 
@@ -639,16 +643,9 @@ elif page == "Smart Advisor":
         nir = st.number_input("NIR Band", min_value=0.0, max_value=1.0, value=0.72)
 
     if st.button("Run Analysis", type="primary", use_container_width=True):
-        crop, crop_conf = agrimodels.predict_crop_recommendation(
-            [n, p, k, temp, humidity, ph, rainfall],
-            st.session_state.season
-        )
-        irrigation, action, irr_conf = agrimodels.predict_irrigation(
-            [moisture, temp, humidity, ph, rainfall]
-        )
-        yield_pred, yield_conf = agrimodels.predict_crop_yield(
-            [ph, temp, rainfall, n, humidity, moisture]
-        )
+        crop, crop_conf = agrimodels.predict_crop_recommendation([n, p, k, temp, humidity, ph, rainfall], st.session_state.season)
+        irrigation, action, irr_conf = agrimodels.predict_irrigation([moisture, temp, humidity, ph, rainfall])
+        yield_pred, yield_conf = agrimodels.predict_crop_yield([ph, temp, rainfall, n, humidity, moisture])
         ndvi = agrimodels.calculate_ndvi(red, nir)
         health = agrimodels.predict_health_score(ndvi, moisture, temp)
         fert, fert_conf = agrimodels.predict_fertilizer(n, p, k)
@@ -669,12 +666,7 @@ elif page == "Smart Advisor":
         x3.metric("Yield", f"{yield_pred} t/ha", f"{yield_conf}% confidence")
 
         st.markdown(
-            f"<div class='health-card'><h3>Final Farm Decision</h3>"
-            f"<p><strong>Recommended crop:</strong> {crop}</p>"
-            f"<p><strong>Irrigation:</strong> {irrigation} - {action}</p>"
-            f"<p><strong>Fertilizer:</strong> {fert}</p>"
-            f"<p><strong>NDVI:</strong> {ndvi} | <strong>Health score:</strong> {health}%</p>"
-            f"<p><strong>Expected yield:</strong> {yield_pred} t/ha</p></div>",
+            f"<div class='health-card'><h3>Final Farm Decision</h3><p><strong>Recommended crop:</strong> {crop}</p><p><strong>Irrigation:</strong> {irrigation} - {action}</p><p><strong>Fertilizer:</strong> {fert}</p><p><strong>NDVI:</strong> {ndvi} | <strong>Health score:</strong> {health}%</p><p><strong>Expected yield:</strong> {yield_pred} t/ha</p></div>",
             unsafe_allow_html=True
         )
 
@@ -720,12 +712,7 @@ elif page == "NDVI Analysis":
     if st.button("Calculate NDVI", use_container_width=True):
         ndvi = agrimodels.calculate_ndvi(red, nir)
         health = agrimodels.predict_health_score(ndvi, moisture, temp)
-        gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=health,
-            title={'text': "Health Score"},
-            gauge={'axis': {'range': [0, 100]}}
-        ))
+        gauge = go.Figure(go.Indicator(mode="gauge+number", value=health, title={'text': "Health Score"}, gauge={'axis': {'range': [0, 100]}}))
         gauge.update_layout(height=350)
         st.plotly_chart(gauge, use_container_width=True)
         st.success(f"NDVI: {ndvi} | Health score: {health}%")
@@ -739,16 +726,11 @@ elif page == "Disease Detection":
 
         if st.button("Analyze Disease", use_container_width=True):
             result = agrimodels.predict_disease(arr)
-            st.warning(
-                f"Predicted condition: {result['class_name']} "
-                f"(confidence: {round(result['confidence'] * 100, 2)}%)"
-            )
+            st.warning(f"Predicted condition: {result['class_name']} (confidence: {round(result['confidence'] * 100, 2)}%)")
 
 elif page == "AI Assistant":
-    toolbar_text = (
-        f"💬 AgriVision AI Chat | 📍 {st.session_state.district} | 🌾 {st.session_state.season} | "
-        + ("✅ Smart Advisor data loaded" if st.session_state.latest_farm_data else "⚠️ Run Smart Advisor for personalized context")
-    )
+    toolbar_text = f"💬 AgriVision AI Chat | 📍 {st.session_state.district} | 🌾 {st.session_state.season} | " + ("✅ Smart Advisor data loaded" if st.session_state.latest_farm_data else "⚠️ Run Smart Advisor for personalized context")
+
     st.markdown(f"<div class='chat-toolbar'>{toolbar_text}</div>", unsafe_allow_html=True)
 
     for message in st.session_state.chat_history:
@@ -763,18 +745,9 @@ elif page == "AI Assistant":
 
         with st.chat_message("assistant"):
             with st.spinner("AgriVision AI is analyzing..."):
-                reply = get_gemini_reply(
-                    prompt,
-                    st.session_state.latest_farm_data,
-                    st.session_state.district,
-                    st.session_state.season
-                )
+                reply = get_gemini_reply(prompt, st.session_state.latest_farm_data, st.session_state.district, st.session_state.season)
                 st.markdown(reply)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-
 st.markdown("---")
-st.markdown(
-    "<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Gemini chatbot ready</div>",
-    unsafe_allow_html=True
-)
+st.markdown("<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Gemini chatbot ready</div>", unsafe_allow_html=True)
