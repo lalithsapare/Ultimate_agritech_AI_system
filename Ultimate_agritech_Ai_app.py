@@ -5,22 +5,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
 import streamlit as st
-from dotenv import load_dotenv
 
-load_dotenv()
-
-st.set_page_config(page_title="Agrivision AI", page_icon="🌾", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AgriVision AI", page_icon="🌾", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
 <style>
-.main {background: linear-gradient(135deg, #0f1f0f 0%, #1a2f1a 100%);} 
+.main {background: linear-gradient(135deg, #0f1f0f 0%, #1a2f1a 100%);}
 .block-container {padding-top: 1rem; padding-bottom: 1rem;}
-[data-testid="stSidebar"] {background: linear-gradient(180deg, #14532d 0%, #166534 50%, #14532d 100%);} 
+[data-testid="stSidebar"] {background: linear-gradient(180deg, #14532d 0%, #166534 50%, #14532d 100%);}
 [data-testid="stSidebar"] * {color: white !important;}
 .hero-dashboard {background: linear-gradient(90deg, #166534, #22c55e, #16a34a); color: white; padding: 1.8rem 1.5rem; border-radius: 24px; box-shadow: 0 12px 32px rgba(22, 101, 52, 0.3); margin-bottom: 1.5rem;}
-.metric-card {background: rgba(255,255,255,0.97); border-radius: 20px; padding: 1.4rem; text-align: center; border: 1px solid #dcfce7; box-shadow: 0 8px 24px rgba(0,0,0,0.12);} 
-.info-card {background: rgba(255,255,255,0.96); border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(0,0,0,0.10); border: 1px solid #dcfce7; margin-bottom: 1rem;}
-.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 6px solid #16a34a; border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15);} 
+.metric-card {background: rgba(255,255,255,0.97); border-radius: 20px; padding: 1.4rem; text-align: center; border: 1px solid #dcfce7; box-shadow: 0 8px 24px rgba(0,0,0,0.12);}
+.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 6px solid #16a34a; border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15);}
 .chat-toolbar {background: rgba(255,255,255,0.96); border-radius: 16px; padding: 1rem 1.2rem; border: 1px solid #dcfce7; margin-bottom: 1rem; color: #14532d;}
 .farm-title {font-size: 2.35rem; font-weight: 800; margin: 0;}
 .subtitle {margin: 0.4rem 0 0 0; font-size: 1.05rem; opacity: 0.96;}
@@ -83,11 +79,18 @@ if "district" not in st.session_state:
 if "season" not in st.session_state:
     st.session_state.season = "Kharif"
 
+def get_gemini_api_key():
+    try:
+        if "GEMINI_API_KEY" in st.secrets:
+            return st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        pass
+    return os.getenv("GEMINI_API_KEY", "").strip()
 
 def get_gemini_reply(user_text, farm_data, district, season):
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key = get_gemini_api_key()
     if not api_key:
-        return "Gemini API key missing. Add GEMINI_API_KEY in your .env file or Streamlit secrets."
+        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit secrets or environment variables."
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
@@ -101,7 +104,7 @@ def get_gemini_reply(user_text, farm_data, district, season):
                 f"Health score: {farm_data.get('health')}%. Fertilizer: {farm_data.get('fertilizer')}."
             )
         prompt = f"""
-You are Agrivision AI, a practical Telangana agriculture assistant.
+You are AgriVision AI, a practical Telangana agriculture assistant.
 Answer in simple farmer-friendly language.
 Structure reply as:
 1. What is happening
@@ -117,9 +120,10 @@ User question:
 """
         response = model.generate_content(prompt)
         return response.text.strip()
+    except ModuleNotFoundError:
+        return "google-generativeai module not installed. Install it with: pip install google-generativeai"
     except Exception as e:
         return f"Gemini chatbot error: {e}"
-
 
 def process_image(uploaded_file):
     image = Image.open(uploaded_file).convert("RGB")
@@ -127,14 +131,13 @@ def process_image(uploaded_file):
     arr = np.array(image, dtype=np.float32)
     return image, arr
 
-
 def render_header():
     st.markdown(
         f"""
         <div class="hero-dashboard">
             <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;'>
                 <div>
-                    <h1 class="farm-title">Agrivision AI</h1>
+                    <h1 class="farm-title">AgriVision AI</h1>
                     <p class="subtitle">Farm Health AI</p>
                 </div>
                 <div style='text-align:right;'>
@@ -147,7 +150,6 @@ def render_header():
         unsafe_allow_html=True,
     )
 
-
 def render_top_dashboard():
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -159,7 +161,7 @@ def render_top_dashboard():
     with c4:
         st.markdown("<div class='metric-card'><div class='small-muted'>Soil Moisture</div><h2 style='color:#2563eb;'>62%</h2><div class='small-muted'>Optimal</div></div>", unsafe_allow_html=True)
 
-st.sidebar.title("🌾 Agrivision AI")
+st.sidebar.title("🌾 AgriVision AI")
 page = st.sidebar.radio(
     "Choose Module",
     ["Dashboard", "Smart Advisor", "Crop Recommendation", "Yield Prediction", "Irrigation", "Fertilizer & Soil", "NDVI Analysis", "Disease Detection", "AI Assistant"],
@@ -270,7 +272,7 @@ elif page == "Disease Detection":
             st.warning(f"Predicted condition: {labels[score]} (demo vision module)")
 
 elif page == "AI Assistant":
-    toolbar_text = f"💬 Agrivision AI Chat | 📍 {st.session_state.district} | 🌾 {st.session_state.season} | " + ("✅ Smart Advisor data loaded" if st.session_state.latest_farm_data else "⚠️ Run Smart Advisor for personalized context")
+    toolbar_text = f"💬 AgriVision AI Chat | 📍 {st.session_state.district} | 🌾 {st.session_state.season} | " + ("✅ Smart Advisor data loaded" if st.session_state.latest_farm_data else "⚠️ Run Smart Advisor for personalized context")
     st.markdown(f"<div class='chat-toolbar'>{toolbar_text}</div>", unsafe_allow_html=True)
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
@@ -280,10 +282,10 @@ elif page == "AI Assistant":
         with st.chat_message("user"):
             st.markdown(prompt)
         with st.chat_message("assistant"):
-            with st.spinner("Agrivision AI is analyzing..."):
+            with st.spinner("AgriVision AI is analyzing..."):
                 reply = get_gemini_reply(prompt, st.session_state.latest_farm_data, st.session_state.district, st.session_state.season)
                 st.markdown(reply)
                 st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
 st.markdown("---")
-st.markdown("<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 Agrivision AI | Farm Health AI | Telangana Edition | Gemini chatbot ready</div>", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Gemini chatbot ready</div>", unsafe_allow_html=True)
