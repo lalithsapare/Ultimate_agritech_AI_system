@@ -1,7 +1,9 @@
-streamlit>=1.44
-numpy>=2.3
-pandas>=2.3.3
-scikit-learn>=1.7
-pillow>=11.3
-joblib>=1.5
-plotly>=6.0
+streamlit
+numpy
+pandas
+plotly
+pillow
+joblib
+google-generativeai
+tensorflow
+scikit-learn
