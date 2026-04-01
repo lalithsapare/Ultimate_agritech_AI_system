@@ -1,336 +1,289 @@
-import streamlit as st
+import os
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from PIL import Image
-import time
+import streamlit as st
+from dotenv import load_dotenv
 
-# ---------------------- PAGE CONFIG ----------------------
-st.set_page_config(
-    page_title="Agrivision AI - Telangana Edition",
-    page_icon="🌾",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+load_dotenv()
 
-# ---------------------- CUSTOM CSS - Telangana Edition ----------------------
+st.set_page_config(page_title="Agrivision AI", page_icon="🌾", layout="wide", initial_sidebar_state="expanded")
+
 st.markdown("""
 <style>
-/* Telangana Green Theme */
-.main {
-    background: linear-gradient(135deg, #0f1f0f 0%, #1a2f1a 100%);
-}
-.block-container {
-    padding-top: 1rem;
-    padding-bottom: 1rem;
-}
-
-/* Sidebar - Telangana Forest Green */
-[data-testid="stSidebar"] {
-    background: linear-gradient(180deg, #14532d 0%, #166534 50%, #14532d 100%);
-}
-[data-testid="stSidebar"] * {
-    color: white !important;
-}
-
-/* Hero Dashboard Header */
-.hero-dashboard {
-    background: linear-gradient(90deg, #166534, #22c55e, #16a34a);
-    color: white;
-    padding: 1.8rem 1.5rem;
-    border-radius: 24px;
-    box-shadow: 0 12px 32px rgba(22, 101, 52, 0.3);
-    margin-bottom: 1.5rem;
-}
-
-/* KPI Metric Cards */
-.metric-card {
-    background: rgba(255,255,255,0.97);
-    border-radius: 20px;
-    padding: 1.4rem;
-    text-align: center;
-    border: 1px solid #dcfce7;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    transition: all 0.3s ease;
-}
-.metric-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 16px 40px rgba(0,0,0,0.18);
-}
-
-/* Farm Health Status Cards */
-.health-card {
-    background: linear-gradient(135deg, #f0fdf4, #dcfce7);
-    border-left: 6px solid #16a34a;
-    border-radius: 20px;
-    padding: 1.6rem;
-    box-shadow: 0 8px 24px rgba(22,101,52,0.15);
-}
-
-/* Telangana Info Cards */
-.info-card {
-    background: rgba(255,255,255,0.95);
-    border-radius: 20px;
-    padding: 1.6rem;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.10);
-    border: 1px solid #dcfce7;
-}
-
-/* Chat Components */
-.chat-toolbar {
-    background: rgba(255,255,255,0.96);
-    border-radius: 16px;
-    padding: 1rem 1.2rem;
-    border: 1px solid #dcfce7;
-    margin-bottom: 1rem;
-}
-.quick-chip {
-    background: linear-gradient(135deg, #dcfce7, #bbf7d0);
-    border: 1px solid #16a34a;
-    color: #166534;
-    border-radius: 24px;
-    padding: 0.6rem 1.2rem;
-    font-weight: 600;
-    margin: 0.3rem;
-    cursor: pointer;
-}
-.quick-chip:hover {
-    background: linear-gradient(135deg, #16a34a, #22c55e);
-    color: white;
-}
-
-/* Alert Badges */
-.badge-critical { background: #fee2e2; color: #dc2626; padding: 0.3rem 0.8rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
-.badge-warning { background: #fef3c7; color: #d97706; padding: 0.3rem 0.8rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
-.badge-good { background: #dcfce7; color: #16a34a; padding: 0.3rem 0.8rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
-
-/* Typography */
-.farm-title { font-size: 2.4rem; font-weight: 800; background: linear-gradient(135deg, #ffffff, #f0fdf4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.health-score { font-size: 3.2rem; font-weight: 900; color: #16a34a; }
+.main {background: linear-gradient(135deg, #0f1f0f 0%, #1a2f1a 100%);} 
+.block-container {padding-top: 1rem; padding-bottom: 1rem;}
+[data-testid="stSidebar"] {background: linear-gradient(180deg, #14532d 0%, #166534 50%, #14532d 100%);} 
+[data-testid="stSidebar"] * {color: white !important;}
+.hero-dashboard {background: linear-gradient(90deg, #166534, #22c55e, #16a34a); color: white; padding: 1.8rem 1.5rem; border-radius: 24px; box-shadow: 0 12px 32px rgba(22, 101, 52, 0.3); margin-bottom: 1.5rem;}
+.metric-card {background: rgba(255,255,255,0.97); border-radius: 20px; padding: 1.4rem; text-align: center; border: 1px solid #dcfce7; box-shadow: 0 8px 24px rgba(0,0,0,0.12);} 
+.info-card {background: rgba(255,255,255,0.96); border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(0,0,0,0.10); border: 1px solid #dcfce7; margin-bottom: 1rem;}
+.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 6px solid #16a34a; border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15);} 
+.chat-toolbar {background: rgba(255,255,255,0.96); border-radius: 16px; padding: 1rem 1.2rem; border: 1px solid #dcfce7; margin-bottom: 1rem; color: #14532d;}
+.farm-title {font-size: 2.35rem; font-weight: 800; margin: 0;}
+.subtitle {margin: 0.4rem 0 0 0; font-size: 1.05rem; opacity: 0.96;}
+.small-muted {color: #64748b; font-size: 0.9rem;}
+.badge-good {background: #dcfce7; color: #166534; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700;}
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------- MODEL ENGINE (Telangana Optimized) ----------------------
 class TelanganaAgriModels:
     def __init__(self):
-        self.telangana_crops_kharif = ["Cotton", "Maize", "Red Gram", "Soybean", "Turmeric", "Jowar"]
-        self.telangana_crops_rabi = ["Bengal Gram", "Groundnut", "Sesame", "Jowar", "Paddy", "Black Gram"]
-    
+        self.crops = {
+            "Kharif": ["Cotton", "Maize", "Red Gram", "Soybean", "Turmeric", "Jowar"],
+            "Rabi": ["Bengal Gram", "Groundnut", "Sesame", "Jowar", "Paddy", "Black Gram"],
+        }
+
     def predict_crop_recommendation(self, features, season="Kharif"):
-        crops = self.telangana_crops_kharif if season == "Kharif" else self.telangana_crops_rabi
-        score = int(sum(features)) % len(crops)
-        crop = crops[score]
+        season_crops = self.crops.get(season, self.crops["Kharif"])
+        score = int(sum(features)) % len(season_crops)
+        crop = season_crops[score]
         confidence = round(85 + (score % 10), 1)
         return crop, confidence
-    
+
     def predict_crop_yield(self, features):
         ph, temp, rainfall, fert, humidity, moisture = features
-        # Telangana yield formula (dryer conditions)
         pred = (temp * 0.65) + (rainfall * 0.03) + (fert * 0.045) + (humidity * 0.075) + (moisture * 0.25) - abs(ph - 6.8) * 2.2
         return round(max(pred, 0), 2), 88.0
-    
+
     def predict_irrigation(self, features):
         moisture, temp, humidity, ph, rainfall = features
-        # Telangana irrigation (conservative water use)
         if rainfall > 150 or moisture > 55:
             return "Low", "Skip irrigation cycle", 92.0
-        elif moisture < 28 and temp > 32:
+        if moisture < 28 and temp > 32:
             return "High", "Deep irrigation needed", 90.0
-        else:
-            return "Moderate", "Light irrigation", 89.0
-    
+        return "Moderate", "Light irrigation", 89.0
+
     def calculate_ndvi(self, red, nir):
         return round((nir - red) / (nir + red + 1e-8), 4)
-    
+
     def predict_health_score(self, ndvi, moisture, temp):
         score = (ndvi * 50) + (moisture * 0.3) + ((35 - abs(temp - 28)) * 0.2)
         return min(100, max(0, round(score, 1)))
 
+    def predict_fertilizer(self, n, p, k):
+        if n < 50:
+            return "Apply nitrogen fertilizer in split doses", 87.0
+        if p < 40:
+            return "Apply phosphorus fertilizer with basal dose", 86.0
+        if k < 40:
+            return "Apply potash for stress tolerance", 85.0
+        return "Use balanced NPK fertilizer with organic manure", 89.0
+
 agrimodels = TelanganaAgriModels()
 
-# ---------------------- SESSION STATE ----------------------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "latest_farm_data" not in st.session_state:
     st.session_state.latest_farm_data = None
-if "location" not in st.session_state:
-    st.session_state.location = "Telangana"
+if "district" not in st.session_state:
+    st.session_state.district = "Hyderabad"
 if "season" not in st.session_state:
     st.session_state.season = "Kharif"
 
-# ---------------------- FARM HEALTH DASHBOARD (ALWAYS VISIBLE) ----------------------
-def render_farm_health_dashboard():
-    st.markdown("""
-    <div class="hero-dashboard">
-        <div style='display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;'>
-            <div>
-                <h1 class="farm-title">Agrivision AI</h1>
-                <p style='margin: 0; font-size: 1.1rem;'>Real-time Telangana farm health monitoring & AI decisions</p>
-            </div>
-            <div style='text-align: right;'>
-                <span style='font-size: 0.9rem; opacity: 0.9;'>📍 Telangana | 🌾 Kharif 2026</span>
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # KPI Cards
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown("""
-        <div class="metric-card">
-            <div style='font-size: 0.85rem; color: #64748b; font-weight: 600; margin-bottom: 0.5rem;'>Overall Health</div>
-            <div class="health-score">87.4%</div>
-            <div style='color: #16a34a; font-size: 0.85rem; font-weight: 600;'>+3.2% this week</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <div style='font-size: 0.85rem; color: #64748b; font-weight: 600; margin-bottom: 0.5rem;'>Active Alerts</div>
-            <div style='font-size: 2.2rem; font-weight: 800; color: #dc2626;'>4</div>
-            <div style='color: #dc2626; font-size: 0.85rem; font-weight: 600;'>2 Critical</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown("""
-        <div class="metric-card">
-            <div style='font-size: 0.85rem; color: #64748b; font-weight: 600; margin-bottom: 0.5rem;'>Yield Forecast</div>
-            <div style='font-size: 2.2rem; font-weight: 800; color: #16a34a;'>4.2 t/ha</div>
-            <div style='color: #16a34a; font-size: 0.85rem; font-weight: 600;'>On track</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col4:
-        st.markdown("""
-        <div class="metric-card">
-            <div style='font-size: 0.85rem; color: #64748b; font-weight: 600; margin-bottom: 0.5rem;'>Soil Moisture</div>
-            <div style='font-size: 2.2rem; font-weight: 800; color: #3b82f6;'>62%</div>
-            <div style='color: #3b82f6; font-size: 0.85rem; font-weight: 600;'>Optimal</div>
-        </div>
-        """, unsafe_allow_html=True)
 
-# ---------------------- SIDEBAR ----------------------
+def get_gemini_reply(user_text, farm_data, district, season):
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return "Gemini API key missing. Add GEMINI_API_KEY in your .env file or Streamlit secrets."
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        farm_context = "No latest farm data available."
+        if farm_data:
+            farm_context = (
+                f"District: {district}. Season: {season}. Recommended crop: {farm_data.get('crop')}. "
+                f"Irrigation: {farm_data.get('irrigation')} ({farm_data.get('action')}). "
+                f"Expected yield: {farm_data.get('yield')} t/ha. NDVI: {farm_data.get('ndvi')}. "
+                f"Health score: {farm_data.get('health')}%. Fertilizer: {farm_data.get('fertilizer')}."
+            )
+        prompt = f"""
+You are Agrivision AI, a practical Telangana agriculture assistant.
+Answer in simple farmer-friendly language.
+Structure reply as:
+1. What is happening
+2. Why
+3. Immediate action
+4. Next 3 days
+
+Farm context:
+{farm_context}
+
+User question:
+{user_text}
+"""
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Gemini chatbot error: {e}"
+
+
+def process_image(uploaded_file):
+    image = Image.open(uploaded_file).convert("RGB")
+    image = image.resize((224, 224))
+    arr = np.array(image, dtype=np.float32)
+    return image, arr
+
+
+def render_header():
+    st.markdown(
+        f"""
+        <div class="hero-dashboard">
+            <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;'>
+                <div>
+                    <h1 class="farm-title">Agrivision AI</h1>
+                    <p class="subtitle">Farm Health AI</p>
+                </div>
+                <div style='text-align:right;'>
+                    <div><span class="badge-good">Telangana Edition</span></div>
+                    <div style='margin-top:0.5rem;font-size:0.95rem;'>📍 {st.session_state.district} | 🌾 {st.session_state.season}</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_top_dashboard():
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown("<div class='metric-card'><div class='small-muted'>Overall Health</div><h2 style='color:#16a34a;'>87.4%</h2><div class='small-muted'>+3.2% this week</div></div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='metric-card'><div class='small-muted'>Active Alerts</div><h2 style='color:#dc2626;'>4</h2><div class='small-muted'>2 critical zones</div></div>", unsafe_allow_html=True)
+    with c3:
+        st.markdown("<div class='metric-card'><div class='small-muted'>Yield Forecast</div><h2 style='color:#166534;'>4.2 t/ha</h2><div class='small-muted'>On target</div></div>", unsafe_allow_html=True)
+    with c4:
+        st.markdown("<div class='metric-card'><div class='small-muted'>Soil Moisture</div><h2 style='color:#2563eb;'>62%</h2><div class='small-muted'>Optimal</div></div>", unsafe_allow_html=True)
+
 st.sidebar.title("🌾 Agrivision AI")
-st.sidebar.markdown("**Telangana Edition**")
-page = st.sidebar.radio("Navigate", [
-    "📊 Dashboard", "🧠 Smart Advisor", "🌾 Crop Recommendation", 
-    "📈 Yield Prediction", "💧 Irrigation", "🧪 Fertilizer & Soil",
-    "📊 NDVI Analysis", "🖼️ Disease Detection", "💬 AI Assistant"
-])
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🌍 Telangana Settings")
-st.session_state.location = st.sidebar.selectbox("District", [
-    "Hyderabad", "Ranga Reddy", "Medchal", "Sangareddy", "Mahabubnagar"
-])
+page = st.sidebar.radio(
+    "Choose Module",
+    ["Dashboard", "Smart Advisor", "Crop Recommendation", "Yield Prediction", "Irrigation", "Fertilizer & Soil", "NDVI Analysis", "Disease Detection", "AI Assistant"],
+)
+st.sidebar.markdown("### Telangana Filters")
+st.session_state.district = st.sidebar.selectbox("District", ["Hyderabad", "Ranga Reddy", "Medchal", "Sangareddy", "Mahabubnagar"])
 st.session_state.season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"])
 
-# Render Farm Health Dashboard (Always Visible)
-render_farm_health_dashboard()
+render_header()
+render_top_dashboard()
 
-# ---------------------- MAIN CONTENT ----------------------
-if page == "📊 Dashboard":
-    st.markdown("## Farm Health Analytics")
-    
+if page == "Dashboard":
+    st.markdown("## Farm Health Overview")
+    trend_df = pd.DataFrame({"Day": [f"Day {i}" for i in range(1, 31)], "Health Index": [72, 74, 73, 75, 77, 76, 78, 79, 80, 78, 81, 83, 82, 84, 85, 86, 84, 87, 88, 89, 87, 90, 91, 89, 92, 93, 91, 94, 95, 96]})
+    zone_df = pd.DataFrame({"Zone": ["Healthy", "Moderate", "High Risk", "Critical"], "Value": [52, 28, 14, 6]})
     col1, col2 = st.columns([2, 1])
     with col1:
-        # Health Trend Chart
-        days = [f"D{i}" for i in range(1, 31)]
-        health = np.array([72,74,73,75,77,76,78,79,80,78,81,83,82,84,85,86,84,87,88,89,87,90,91,89,92,93,91,94,95,96])
-        fig = px.line(x=days, y=health, markers=False, title="30-Day Crop Health Trend")
-        fig.update_traces(line_color="#16a34a", line_width=4)
-        fig.update_layout(height=400, template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
-    
+        fig_line = px.line(trend_df, x="Day", y="Health Index", title="Crop Health Trend - 30 Days")
+        fig_line.update_traces(line=dict(color="#16a34a", width=4))
+        fig_line.update_layout(height=360, template="plotly_white")
+        st.plotly_chart(fig_line, use_container_width=True)
     with col2:
-        st.markdown('<div class="health-card">', unsafe_allow_html=True)
-        st.markdown("### 🚨 Active Alerts")
-        st.markdown('<span class="badge-critical">Zone A: Leaf Blight</span><br>', unsafe_allow_html=True)
-        st.markdown('<span class="badge-warning">Zone B: Low Nitrogen</span><br>', unsafe_allow_html=True)
-        st.markdown('<span class="badge-warning">Zone C: Aphids Detected</span>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        fig_pie = px.pie(zone_df, names="Zone", values="Value", hole=0.55, title="Zone Distribution")
+        fig_pie.update_layout(height=360, template="plotly_white")
+        st.plotly_chart(fig_pie, use_container_width=True)
 
-elif page == "🧠 Smart Advisor":
-    st.markdown('<div class="info-card">', unsafe_allow_html=True)
-    st.subheader("🧠 Complete Telangana Farm Analysis")
-    
-    c1, c2, c3 = st.columns(3)
-    with c1: 
-        N, P, K = st.number_input("Nitrogen", 80, 120, 90), st.number_input("Phosphorus", 35, 55, 42), st.number_input("Potassium", 35, 55, 43)
-        ph = st.number_input("pH", 5.5, 8.5, 6.7)
-    with c2:
-        temp, humidity, rainfall = st.number_input("Temp (°C)", 20, 40, 29), st.number_input("Humidity %", 50, 95, 78), st.number_input("Rainfall mm", 50, 300, 180)
-    with c3:
-        moisture = st.number_input("Soil Moisture %", 20, 80, 42)
-        red, nir = st.number_input("Red Band", 0.0, 1.0, 0.3), st.number_input("NIR Band", 0.0, 1.0, 0.72)
-    
-    if st.button("🚀 Run Smart Analysis", type="primary", use_container_width=True):
-        with st.spinner("Analyzing Telangana farm conditions..."):
-            crop, crop_conf = agrimodels.predict_crop_recommendation([N,P,K,temp,humidity,ph,rainfall], st.session_state.season)
-            irrigation, action, irr_conf = agrimodels.predict_irrigation([moisture,temp,humidity,ph,rainfall])
-            yield_pred, yield_conf = agrimodels.predict_crop_yield([ph,temp,rainfall,N,humidity,moisture])
-            ndvi = agrimodels.calculate_ndvi(red, nir)
-            health_score = agrimodels.predict_health_score(ndvi, moisture, temp)
-            
-            st.session_state.latest_farm_data = {
-                "crop": crop, "irrigation": irrigation, "yield": yield_pred,
-                "ndvi": ndvi, "health": health_score, "action": action
-            }
-            
-            col1, col2, col3 = st.columns(3)
-            with col1: st.metric("Recommended Crop", crop, f"{crop_conf}%")
-            with col2: st.metric("Irrigation Need", irrigation, action)
-            with col3: st.metric("Expected Yield", f"{yield_pred} t/ha", f"{yield_conf}%")
-            
-            st.markdown(f"""
-            <div class="health-card">
-                <h3>✅ Telangana Farm Action Plan</h3>
-                <strong>🌾 Best Crop:</strong> {crop}<br>
-                <strong>💧 Irrigation:</strong> {irrigation} - {action}<br>
-                <strong>📈 Health Score:</strong> <span style='color:#16a34a;font-size:1.5rem;'>{health_score}%</span><br>
-                <strong>🎯 Yield Target:</strong> {yield_pred} tons/ha
-            </div>
-            """, unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+elif page == "Smart Advisor":
+    st.markdown("## Smart Farm Advisor")
+    a, b, c = st.columns(3)
+    with a:
+        n = st.number_input("Nitrogen (N)", value=88.0)
+        p = st.number_input("Phosphorus (P)", value=40.0)
+        k = st.number_input("Potassium (K)", value=41.0)
+        ph = st.number_input("Soil pH", value=6.7)
+    with b:
+        temp = st.number_input("Temperature (°C)", value=29.0)
+        humidity = st.number_input("Humidity (%)", value=78.0)
+        rainfall = st.number_input("Rainfall (mm)", value=180.0)
+    with c:
+        moisture = st.number_input("Soil Moisture (%)", value=42.0)
+        red = st.number_input("Red Band", min_value=0.0, max_value=1.0, value=0.30)
+        nir = st.number_input("NIR Band", min_value=0.0, max_value=1.0, value=0.72)
 
-elif page == "💬 AI Assistant":
-    st.markdown("""
-    <div class="chat-toolbar">
-        🤖 Telangana AI Farm Assistant | 📍 {location} | 🌾 {season} 
-        {'✅ Smart Advisor data loaded!' if st.session_state.latest_farm_data else '⚠️ Run Smart Advisor first'}
-    </div>
-    """.format(location=st.session_state.location, season=st.session_state.season), unsafe_allow_html=True)
-    
-    # Quick Action Chips
-    cols = st.columns(4)
-    for col, question in zip(cols, ["What should I do?", "Irrigation?", "Fertilizer?", "Disease?"]):
-        with col:
-            if st.button(question, key=question, help="Quick farm advice"):
-                reply = f"**{question}** → For {st.session_state.location} {st.session_state.season}: "
-                if st.session_state.latest_farm_data:
-                    reply += f"Grow {st.session_state.latest_farm_data['crop']}, {st.session_state.latest_farm_data['irrigation']} irrigation"
-                st.success(reply)
-    
-    # Chat Interface
-    if prompt := st.chat_input("Ask about Telangana farming..."):
-        with st.chat_message("user"): st.markdown(prompt)
+    if st.button("Run Analysis", type="primary", use_container_width=True):
+        crop, crop_conf = agrimodels.predict_crop_recommendation([n, p, k, temp, humidity, ph, rainfall], st.session_state.season)
+        irrigation, action, irr_conf = agrimodels.predict_irrigation([moisture, temp, humidity, ph, rainfall])
+        yield_pred, yield_conf = agrimodels.predict_crop_yield([ph, temp, rainfall, n, humidity, moisture])
+        ndvi = agrimodels.calculate_ndvi(red, nir)
+        health = agrimodels.predict_health_score(ndvi, moisture, temp)
+        fert, fert_conf = agrimodels.predict_fertilizer(n, p, k)
+        st.session_state.latest_farm_data = {"crop": crop, "irrigation": irrigation, "action": action, "yield": yield_pred, "ndvi": ndvi, "health": health, "fertilizer": fert}
+        x1, x2, x3 = st.columns(3)
+        x1.metric("Crop", crop, f"{crop_conf}% confidence")
+        x2.metric("Irrigation", irrigation, action)
+        x3.metric("Yield", f"{yield_pred} t/ha", f"{yield_conf}% confidence")
+        st.markdown(f"<div class='health-card'><h3>Final Farm Decision</h3><p><strong>Recommended crop:</strong> {crop}</p><p><strong>Irrigation:</strong> {irrigation} - {action}</p><p><strong>Fertilizer:</strong> {fert}</p><p><strong>NDVI:</strong> {ndvi} | <strong>Health score:</strong> {health}%</p><p><strong>Expected yield:</strong> {yield_pred} t/ha</p></div>", unsafe_allow_html=True)
+
+elif page == "Crop Recommendation":
+    vals = [st.number_input(f"Feature {i+1}", value=float(80 + i)) for i in range(7)]
+    if st.button("Recommend Crop", use_container_width=True):
+        crop, conf = agrimodels.predict_crop_recommendation(vals, st.session_state.season)
+        st.success(f"Recommended crop: {crop} ({conf}% confidence)")
+
+elif page == "Yield Prediction":
+    vals = [st.number_input(f"Input {i+1}", value=25.0 + i) for i in range(6)]
+    if st.button("Predict Yield", use_container_width=True):
+        y, conf = agrimodels.predict_crop_yield(vals)
+        st.metric("Expected Yield", f"{y} t/ha", f"{conf}% confidence")
+
+elif page == "Irrigation":
+    vals = [st.number_input(f"Parameter {i+1}", value=40.0 + i) for i in range(5)]
+    if st.button("Get Irrigation Plan", use_container_width=True):
+        result, action, conf = agrimodels.predict_irrigation(vals)
+        st.info(f"Need: {result} | Action: {action} | Confidence: {conf}%")
+
+elif page == "Fertilizer & Soil":
+    n = st.number_input("Nitrogen", value=45.0)
+    p = st.number_input("Phosphorus", value=38.0)
+    k = st.number_input("Potassium", value=42.0)
+    if st.button("Analyze Soil", use_container_width=True):
+        fert, conf = agrimodels.predict_fertilizer(n, p, k)
+        df = pd.DataFrame({"Nutrient": ["N", "P", "K"], "Value": [n, p, k]})
+        fig = px.bar(df, x="Nutrient", y="Value", color="Nutrient", title="Soil Nutrient Levels")
+        st.plotly_chart(fig, use_container_width=True)
+        st.success(f"Recommendation: {fert} ({conf}% confidence)")
+
+elif page == "NDVI Analysis":
+    red = st.slider("Red Band", 0.0, 1.0, 0.30)
+    nir = st.slider("NIR Band", 0.0, 1.0, 0.72)
+    temp = st.slider("Temperature", 15.0, 45.0, 29.0)
+    moisture = st.slider("Soil Moisture", 10.0, 80.0, 42.0)
+    if st.button("Calculate NDVI", use_container_width=True):
+        ndvi = agrimodels.calculate_ndvi(red, nir)
+        health = agrimodels.predict_health_score(ndvi, moisture, temp)
+        gauge = go.Figure(go.Indicator(mode="gauge+number", value=health, title={'text': "Health Score"}, gauge={'axis': {'range': [0, 100]}}))
+        gauge.update_layout(height=350)
+        st.plotly_chart(gauge, use_container_width=True)
+        st.success(f"NDVI: {ndvi} | Health score: {health}%")
+
+elif page == "Disease Detection":
+    uploaded_file = st.file_uploader("Upload crop leaf image", type=["jpg", "jpeg", "png"])
+    if uploaded_file:
+        image, arr = process_image(uploaded_file)
+        st.image(image, caption="Uploaded leaf image", use_container_width=True)
+        if st.button("Analyze Disease", use_container_width=True):
+            score = int(np.mean(arr)) % 4
+            labels = ["Healthy", "Leaf Blight", "Rust", "Leaf Spot"]
+            st.warning(f"Predicted condition: {labels[score]} (demo vision module)")
+
+elif page == "AI Assistant":
+    toolbar_text = f"💬 Agrivision AI Chat | 📍 {st.session_state.district} | 🌾 {st.session_state.season} | " + ("✅ Smart Advisor data loaded" if st.session_state.latest_farm_data else "⚠️ Run Smart Advisor for personalized context")
+    st.markdown(f"<div class='chat-toolbar'>{toolbar_text}</div>", unsafe_allow_html=True)
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    if prompt := st.chat_input("Ask about irrigation, crop, disease, fertilizer, or Telangana farming..."):
+        st.session_state.chat_history.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
         with st.chat_message("assistant"):
-            if st.session_state.latest_farm_data:
-                st.markdown(f"""
-                **🌾 {st.session_state.latest_farm_data['crop']}** is best for your conditions.
-                **💧 {st.session_state.latest_farm_data['irrigation']}** irrigation needed.
-                **📊 Health:** {st.session_state.latest_farm_data['health']:.1f}% 
-                **🎯 Action:** {st.session_state.latest_farm_data['action']}
-                """)
-            else:
-                st.info("Run Smart Advisor first for personalized Telangana farm advice!")
+            with st.spinner("Agrivision AI is analyzing..."):
+                reply = get_gemini_reply(prompt, st.session_state.latest_farm_data, st.session_state.district, st.session_state.season)
+                st.markdown(reply)
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
-# ---------------------- FOOTER ----------------------
 st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #86efac; padding: 2rem; font-size: 0.95rem;'>
-    🌾 **Agrivision AI - Telangana Edition** | Built for Telangana farmers | 
-    Perfect portfolio for Hyderabad AgriTech jobs (7LPA+) | Deploy ready
-</div>
-""", unsafe_allow_html=True)
+st.markdown("<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 Agrivision AI | Farm Health AI | Telangana Edition | Gemini chatbot ready</div>", unsafe_allow_html=True)
