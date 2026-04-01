@@ -21,6 +21,13 @@ except Exception:
 # =========================
 GEMINI_API_KEY = "AIzaSyDRXgSxLK1hgvciYqCchUdW9b1FAQjBH9o"
 
+# Current supported model candidates
+GEMINI_MODEL_CANDIDATES = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash-001"
+]
+
 
 st.set_page_config(
     page_title="AgriVision AI",
@@ -63,13 +70,13 @@ class AgritechModels:
     def _define_schemas(self):
         self.schemas = {
             "crop_model": {
-                "file": "crop_recommendation_model.pkl",
+                "file": "crop_model.pkl",
                 "type": "tabular_classification",
                 "features": ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"],
-                "encoder": "crop_encoder"
+                "encoder": "crop_encoder.pkl"
             },
             "yield_model": {
-                "file": "crop_yield_model.pkl",
+                "file": "yield_model_ridge.pkl",
                 "type": "tabular_regression",
                 "features": ["ph", "temperature", "rainfall", "fertilizer", "humidity", "soil_moisture"]
             },
@@ -77,24 +84,24 @@ class AgritechModels:
                 "file": "irrigation_model.pkl",
                 "type": "tabular_classification",
                 "features": ["soil_moisture", "temperature", "humidity", "ph", "rainfall"],
-                "encoder": "irrigation_encoder"
+                "encoder": "irrigation_encoder.pkl"
             },
             "fertilizer_model": {
-                "file": "fertilizer_model.pkl",
+                "file": "fertilizer_model_pipeline.joblib",
                 "type": "tabular_classification",
                 "features": [
                     "N", "P", "K", "temperature", "humidity",
                     "moisture", "soil_type", "crop_type", "ph", "rainfall"
                 ],
-                "encoder": "fertilizer_encoder"
+                "encoder": "fertilizer_encoder.pkl"
             },
             "temp_model": {
-                "file": "temperature_model.pkl",
+                "file": "temperature_model.joblib",
                 "type": "tabular_regression",
                 "features": ["sensor_1", "sensor_2"]
             },
             "rain_model": {
-                "file": "rainfall_model.pkl",
+                "file": "rainfall_model.joblib",
                 "type": "tabular_regression",
                 "features": ["temperature", "humidity", "pressure", "wind_speed"]
             },
@@ -125,30 +132,30 @@ class AgritechModels:
                 "outputs": ["N_pred", "P_pred", "K_pred"]
             },
             "ndvi_model": {
-                "file": "ndvi_model.pkl",
+                "file": "ndvi_rnn_model.keras",
                 "type": "tabular_regression",
                 "features": ["red_band", "nir_band"]
             },
             "stress_model": {
-                "file": "crop_stress_model.pkl",
+                "file": "crop_stress_model.keras",
                 "type": "tabular_classification",
                 "features": ["ndvi", "temperature", "soil_moisture", "humidity"],
                 "encoder": "stress_encoder"
             },
-            "disease_model": {
-                "file": "plant_disease_model.h5",
+            "tomato_model": {
+                "file": "tomato_disease_model.h5",
                 "type": "image_classification",
-                "classes_file": "disease_classes.pkl"
+                "classes_file": "tomato_classes.joblib"
             },
-            "leaf_model": {
-                "file": "leaf_classification_model.h5",
+            "rice_model": {
+                "file": "rice_disease_model.h5",
                 "type": "image_classification",
-                "classes_file": "leaf_classes.pkl"
+                "classes_file": "rice_classes.joblib"
             },
-            "weed_model": {
-                "file": "weed_detection_model.h5",
+            "pest_model": {
+                "file": "rice_pest_model.h5",
                 "type": "image_classification",
-                "classes_file": "weed_classes.pkl"
+                "classes_file": "rice_pest_classes.joblib"
             },
             "soil_model": {
                 "file": "soil_classification_model.h5",
@@ -156,9 +163,9 @@ class AgritechModels:
                 "classes_file": "soil_classes.pkl"
             },
             "nutrient_model": {
-                "file": "nutrient_deficiency_model.h5",
+                "file": "nutrient_deficiency_cnn_model.keras",
                 "type": "image_classification",
-                "classes_file": "nutrient_classes.pkl"
+                "classes_file": "nutrient_deficiency_scaler.joblib"
             }
         }
 
@@ -467,6 +474,9 @@ if "district" not in st.session_state:
 if "season" not in st.session_state:
     st.session_state.season = "Kharif"
 
+if "working_gemini_model" not in st.session_state:
+    st.session_state.working_gemini_model = None
+
 
 def get_gemini_api_key():
     try:
@@ -482,28 +492,18 @@ def get_gemini_api_key():
     return GEMINI_API_KEY.strip()
 
 
-def get_gemini_reply(user_text, farm_data, district, season):
-    api_key = get_gemini_api_key()
+def build_farm_prompt(user_text, farm_data, district, season):
+    farm_context = "No latest farm data available."
 
-    if not api_key:
-        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit secrets or environment variables."
+    if farm_data:
+        farm_context = (
+            f"District: {district}. Season: {season}. Recommended crop: {farm_data.get('crop')}. "
+            f"Irrigation: {farm_data.get('irrigation')} ({farm_data.get('action')}). "
+            f"Expected yield: {farm_data.get('yield')} t/ha. NDVI: {farm_data.get('ndvi')}. "
+            f"Health score: {farm_data.get('health')}%. Fertilizer: {farm_data.get('fertilizer')}."
+        )
 
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-
-        farm_context = "No latest farm data available."
-
-        if farm_data:
-            farm_context = (
-                f"District: {district}. Season: {season}. Recommended crop: {farm_data.get('crop')}. "
-                f"Irrigation: {farm_data.get('irrigation')} ({farm_data.get('action')}). "
-                f"Expected yield: {farm_data.get('yield')} t/ha. NDVI: {farm_data.get('ndvi')}. "
-                f"Health score: {farm_data.get('health')}%. Fertilizer: {farm_data.get('fertilizer')}."
-            )
-
-        prompt = f"""
+    prompt = f"""
 You are AgriVision AI, a practical Telangana agriculture assistant.
 
 Answer in simple farmer-friendly language.
@@ -520,8 +520,42 @@ Farm context:
 User question:
 {user_text}
 """
-        response = model.generate_content(prompt)
-        return response.text.strip()
+    return prompt
+
+
+def get_gemini_reply(user_text, farm_data, district, season):
+    api_key = get_gemini_api_key()
+
+    if not api_key:
+        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit secrets or environment variables."
+
+    prompt = build_farm_prompt(user_text, farm_data, district, season)
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+
+        model_errors = []
+
+        if st.session_state.working_gemini_model:
+            try:
+                model = genai.GenerativeModel(st.session_state.working_gemini_model)
+                response = model.generate_content(prompt)
+                return response.text.strip()
+            except Exception as e:
+                model_errors.append(f"{st.session_state.working_gemini_model}: {e}")
+                st.session_state.working_gemini_model = None
+
+        for model_name in GEMINI_MODEL_CANDIDATES:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                st.session_state.working_gemini_model = model_name
+                return response.text.strip()
+            except Exception as e:
+                model_errors.append(f"{model_name}: {e}")
+
+        return "Gemini chatbot error:\n" + "\n".join(model_errors)
 
     except ModuleNotFoundError:
         return "google-generativeai module not installed. Install it with: pip install google-generativeai"
@@ -776,8 +810,9 @@ elif page == "AI Assistant":
 
     st.markdown(f"<div class='chat-toolbar'>{toolbar_text}</div>", unsafe_allow_html=True)
 
-    # DEBUG KEY LINE ADDED HERE
     st.write("DEBUG KEY:", get_gemini_api_key())
+    st.write("DEBUG MODEL:", st.session_state.working_gemini_model or "Not selected yet")
+    st.write("MODEL CANDIDATES:", GEMINI_MODEL_CANDIDATES)
 
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
