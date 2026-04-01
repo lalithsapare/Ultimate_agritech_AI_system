@@ -105,7 +105,6 @@ def estimate_yield(crop, area, rainfall, temperature, soil_moisture, nitrogen, p
         "Sunflower": 9, "Safflower": 7, "Horse Gram": 6, "Castor": 11,
         "Vegetables": 95, "Fodder Maize": 140
     }.get(crop, 12)
-
     weather_factor = 1 + ((rainfall - 300) / 2000) + ((soil_moisture - 40) / 300)
     nutrient_factor = 1 + ((nitrogen + phosphorus + potassium) - 100) / 500
     temp_penalty = 1 - abs(28 - temperature) / 60
@@ -136,10 +135,8 @@ def fertilizer_advice(crop, nitrogen, phosphorus, potassium):
         low.append("Phosphorus")
     if potassium < 25:
         low.append("Potassium")
-
     if not low:
         return f"NPK status looks acceptable for {crop}. Focus on split doses, micronutrients, and soil-test-based application."
-
     crop_specific = CROP_GUIDE.get(crop, {}).get("fert", "Balanced fertilization recommended")
     return f"Low nutrients detected: {', '.join(low)}. For {crop}, recommend: {crop_specific}."
 
@@ -152,7 +149,6 @@ def soil_health_status(ph, nitrogen, phosphorus, potassium):
         msgs.append("Soil is alkaline; gypsum and organic matter may help improve nutrient availability.")
     else:
         msgs.append("Soil pH is in an acceptable range for many Telangana crops.")
-
     avg = (nitrogen + phosphorus + potassium) / 3
     if avg >= 50:
         msgs.append("Macronutrient condition is fairly good.")
@@ -193,7 +189,7 @@ def build_agritech_reply(question, district, season, crop, soil_type, temp, humi
         return f"{intro}\n\n{context}\n\nFertilizer advisory: {fert_note} Soil note: {soil_note}"
 
     if any(word in q for word in ["yield", "production", "output"]):
-        per_acre, total = estimate_yield(crop, 1.0, rainfall, temp, soil_moisture, n, p, k)
+        per_acre, _ = estimate_yield(crop, 1.0, rainfall, temp, soil_moisture, n, p, k)
         return f"{intro}\n\n{context}\n\nEstimated yield for {crop}: about {per_acre} units per acre under current conditions. Yield may reduce if stress continues, so follow irrigation and nutrient corrections quickly."
 
     if any(word in q for word in ["disease", "pest", "stress", "leaf", "yellow"]):
@@ -217,6 +213,25 @@ def draw_gauge(value, title, min_v, max_v, color):
     )
     fig.update_layout(height=260, margin=dict(l=20, r=20, t=50, b=20))
     return fig
+
+
+def ensure_chat_history():
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    if not isinstance(st.session_state.chat_history, list):
+        st.session_state.chat_history = []
+
+    cleaned_history = []
+    for item in st.session_state.chat_history:
+        if isinstance(item, dict):
+            user_text = item.get("question", "")
+            answer_text = item.get("answer", "")
+            cleaned_history.append({"question": str(user_text), "answer": str(answer_text)})
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            cleaned_history.append({"question": str(item[0]), "answer": str(item[1])})
+
+    st.session_state.chat_history = cleaned_history
 
 
 def main():
@@ -303,8 +318,7 @@ def main():
 
     with tabs[7]:
         st.subheader("Farmer chat assistant")
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
+        ensure_chat_history()
 
         user_q = st.text_input("Ask in simple style: Which crop for my field? irrigation? fertilizer? yield? pest stress?")
         col_a, col_b = st.columns([1, 1])
@@ -319,11 +333,11 @@ def main():
                 user_q, district, season, crop, soil_type, temperature, humidity,
                 rainfall, soil_moisture, ph, nitrogen, phosphorus, potassium, ndvi
             )
-            st.session_state.chat_history.append((user_q, reply))
+            st.session_state.chat_history.append({"question": user_q, "answer": reply})
 
-        for q, a in reversed(st.session_state.chat_history):
-            st.markdown(f"**Farmer:** {q}")
-            st.markdown(a)
+        for item in reversed(st.session_state.chat_history):
+            st.markdown(f"**Farmer:** {item['question']}")
+            st.markdown(item["answer"])
             st.markdown("---")
 
     st.markdown("### Telangana crop focus used in this app")
