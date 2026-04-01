@@ -798,7 +798,7 @@ elif page == "AI Assistant":
                     st.session_state.season
                 )
                 st.markdown(reply)
-                st.session_state.chat_history.append({"role": "assistant", "content": reply)
+                st.session_state.chat_history.append({"role": "assistant", "content": reply})
 
 
 st.markdown("---")
