@@ -13,9 +13,6 @@ except Exception:
     TF_AVAILABLE = False
 
 
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
-
-
 st.set_page_config(
     page_title="AgriVision AI",
     page_icon="🌾",
@@ -103,20 +100,19 @@ class TelanganaAgriModels:
         }
 
     def model_status(self):
-        status = [
-            {"Model": "crop_recommendation", "Status": "Demo mode", "Reason": "AgritechModels removed"},
-            {"Model": "yield_prediction", "Status": "Demo mode", "Reason": "AgritechModels removed"},
-            {"Model": "irrigation", "Status": "Demo mode", "Reason": "AgritechModels removed"},
-            {"Model": "fertilizer", "Status": "Demo mode", "Reason": "AgritechModels removed"},
-            {"Model": "ndvi", "Status": "Demo mode", "Reason": "AgritechModels removed"},
-            {"Model": "disease_detection", "Status": "Demo mode", "Reason": "AgritechModels removed"},
+        rows = [
+            {"Model": "crop_recommendation", "Status": "Demo mode", "Reason": "Local rule-based model"},
+            {"Model": "yield_prediction", "Status": "Demo mode", "Reason": "Local rule-based model"},
+            {"Model": "irrigation", "Status": "Demo mode", "Reason": "Local rule-based model"},
+            {"Model": "fertilizer", "Status": "Demo mode", "Reason": "Local rule-based model"},
+            {"Model": "ndvi", "Status": "Demo mode", "Reason": "Local calculation"},
+            {"Model": "disease_detection", "Status": "Demo mode", "Reason": "Simple image rule logic"},
             {"Model": "tensorflow", "Status": "Optional", "Reason": "Imported only if available"}
         ]
-        return pd.DataFrame(status)
+        return pd.DataFrame(rows)
 
 
 agrimodels = TelanganaAgriModels()
-
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -134,7 +130,9 @@ if "season" not in st.session_state:
 def get_gemini_api_key():
     try:
         if "GEMINI_API_KEY" in st.secrets:
-            return st.secrets["GEMINI_API_KEY"]
+            key = st.secrets["GEMINI_API_KEY"]
+            if key and str(key).strip():
+                return str(key).strip()
     except Exception:
         pass
 
@@ -142,14 +140,14 @@ def get_gemini_api_key():
     if env_key:
         return env_key
 
-    return GEMINI_API_KEY.strip()
+    return ""
 
 
 def get_gemini_reply(user_text, farm_data, district, season):
     api_key = get_gemini_api_key()
 
     if not api_key:
-        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit secrets."
+        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit secrets or environment variables."
 
     try:
         from google import genai
@@ -188,10 +186,16 @@ User question:
             contents=prompt,
         )
 
-        return response.text if hasattr(response, "text") else str(response)
+        if hasattr(response, "text") and response.text:
+            return response.text
+
+        return str(response)
 
     except Exception as e:
-        return f"Gemini chatbot error: {e}"
+        error_text = str(e)
+        if "API_KEY_INVALID" in error_text or "API key not valid" in error_text:
+            return "Gemini API key is invalid. Create a fresh key in Google AI Studio and save it as GEMINI_API_KEY in Streamlit secrets."
+        return f"Gemini chatbot error: {error_text}"
 
 
 def process_image(uploaded_file):
@@ -262,6 +266,12 @@ if TF_AVAILABLE:
 else:
     st.sidebar.markdown("<span class='model-miss'>TensorFlow not installed</span>", unsafe_allow_html=True)
 
+key_present = bool(get_gemini_api_key())
+if key_present:
+    st.sidebar.markdown("<span class='model-ok'>Gemini key detected</span>", unsafe_allow_html=True)
+else:
+    st.sidebar.markdown("<span class='model-miss'>Gemini key missing</span>", unsafe_allow_html=True)
+
 with st.sidebar.expander("Model Status"):
     st.dataframe(agrimodels.model_status(), use_container_width=True, hide_index=True)
 
@@ -322,7 +332,7 @@ elif page == "Smart Advisor":
             [n, p, k, temp, humidity, ph, rainfall],
             st.session_state.season
         )
-        irrigation, action, yield_conf_irr = agrimodels.predict_irrigation(
+        irrigation, action, irr_conf = agrimodels.predict_irrigation(
             [moisture, temp, humidity, ph, rainfall]
         )
         yield_pred, yield_conf = agrimodels.predict_crop_yield(
