@@ -611,6 +611,23 @@ st.session_state.district = st.sidebar.selectbox(
 )
 st.session_state.season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"])
 
+# =========================
+# NEW SIDEBAR CROP SELECTION
+# NO CHANGE IN PREVIOUS APP SYSTEM
+# =========================
+st.sidebar.subheader("🌾 Crop Selection")
+
+crop_list = [
+    "Rice", "Cotton", "Maize", "Wheat", "Sugarcane",
+    "Soybean", "Groundnut", "Chilli", "Turmeric"
+]
+
+selected_crops = st.sidebar.multiselect(
+    "Select crops to analyze",
+    crop_list,
+    default=["Rice"]
+)
+
 render_header()
 render_top_dashboard()
 
@@ -766,15 +783,11 @@ elif page == "Multi-Crop Analysis":
     with col3:
         rainfall = st.number_input("Rainfall (mm)", value=95.0, key="mc_rain")
         moisture = st.number_input("Soil Moisture (%)", value=44.0, key="mc_moisture")
-        selected_crops = st.multiselect(
-            "Multi Selected Crops of All Telangana Crops",
-            all_telangana_crops,
-            default=["Rice", "Cotton", "Maize", "Chilli"]
-        )
 
     if st.button("Compare Selected Crops", use_container_width=True):
+        use_crops = selected_crops if selected_crops else ["Rice"]
         rows = []
-        for crop_name in selected_crops:
+        for crop_name in use_crops:
             pred_yield = api_service.predict_yield(ph, temp, rainfall, n, humidity, moisture, crop_name)
             suitability = round(
                 max(50, min(99, 100 - abs(ph - 6.8) * 8 - abs(temp - 28) * 1.2 + (humidity * 0.08))),
