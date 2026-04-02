@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import requests
-import joblib
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -9,19 +8,14 @@ import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
 
-try:
-    import tensorflow as tf
-    TF_AVAILABLE = True
-except Exception:
-    TF_AVAILABLE = False
-
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
 
 # =========================
 # API KEYS
 # =========================
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
-OPENWEATHER_API_KEY = "YOUR_OPENWEATHER_API_KEY"
-
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY")
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "YOUR_OPENWEATHER_API_KEY")
 
 # =========================
 # PAGE CONFIG
@@ -33,6 +27,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# =========================
+# CSS
+# =========================
 st.markdown("""
 <style>
 .main {background: linear-gradient(135deg, #0f1f0f 0%, #1a2f1a 100%);}
@@ -47,202 +44,12 @@ st.markdown("""
 .subtitle {margin: 0.4rem 0 0 0; font-size: 1.05rem; opacity: 0.96;}
 .small-muted {color: #64748b; font-size: 0.9rem;}
 .badge-good {background: #dcfce7; color: #166534; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700;}
-.model-ok {background:#dcfce7;color:#166534;padding:0.25rem 0.5rem;border-radius:999px;font-size:0.75rem;font-weight:700;}
-.model-miss {background:#fee2e2;color:#b91c1c;padding:0.25rem 0.5rem;border-radius:999px;font-size:0.75rem;font-weight:700;}
 .alert-high {background:#fee2e2;color:#991b1b;padding:12px 16px;border-radius:14px;margin-bottom:10px;font-weight:600;}
 .alert-med {background:#fef3c7;color:#92400e;padding:12px 16px;border-radius:14px;margin-bottom:10px;font-weight:600;}
 .alert-good {background:#dcfce7;color:#166534;padding:12px 16px;border-radius:14px;margin-bottom:10px;font-weight:600;}
+.wow-box {background: linear-gradient(135deg, #ecfccb, #dcfce7); border: 1px solid #bbf7d0; color: #14532d; padding: 16px; border-radius: 18px; font-weight: 600;}
 </style>
 """, unsafe_allow_html=True)
-
-
-# =========================
-# MODEL CLASSES
-# =========================
-class AgritechModels:
-    def __init__(self, model_path):
-        self.model_path = Path(model_path)
-        self.models = {}
-        self.encoders = {}
-        self.class_names = {}
-        self.schemas = {}
-        self.load_errors = {}
-        self._define_schemas()
-        self._load_all_models()
-
-    def _define_schemas(self):
-        self.schemas = {
-            "crop_model": {
-                "file": "crop_recommendation_model.pkl",
-                "type": "tabular_classification",
-                "features": ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"],
-                "encoder": "crop_encoder"
-            },
-            "yield_model": {
-                "file": "crop_yield_model.pkl",
-                "type": "tabular_regression",
-                "features": ["ph", "temperature", "rainfall", "fertilizer", "humidity", "soil_moisture"]
-            },
-            "irrigation_model": {
-                "file": "irrigation_model.pkl",
-                "type": "tabular_classification",
-                "features": ["soil_moisture", "temperature", "humidity", "ph", "rainfall"],
-                "encoder": "irrigation_encoder"
-            },
-            "fertilizer_model": {
-                "file": "fertilizer_model.pkl",
-                "type": "tabular_classification",
-                "features": ["N", "P", "K", "temperature", "humidity", "moisture", "soil_type", "crop_type", "ph", "rainfall"],
-                "encoder": "fertilizer_encoder"
-            },
-            "temp_model": {"file": "temperature_model.pkl", "type": "tabular_regression", "features": ["sensor_1", "sensor_2"]},
-            "rain_model": {"file": "rainfall_model.pkl", "type": "tabular_regression", "features": ["temperature", "humidity", "pressure", "wind_speed"]},
-            "humidity_model": {"file": "humidity_model.pkl", "type": "tabular_regression", "features": ["temperature", "pressure", "wind_speed"]},
-            "ph_model": {"file": "ph_model.pkl", "type": "tabular_regression", "features": ["soil_moisture", "organic_matter", "temperature", "rainfall"]},
-            "price_model": {"file": "crop_price_model.pkl", "type": "tabular_regression", "features": ["year", "month", "market_code", "arrival_qty", "demand_index", "crop_code"]},
-            "harvest_model": {"file": "harvest_time_model.pkl", "type": "tabular_regression", "features": ["days_after_sowing", "temperature", "humidity", "ph", "rainfall", "soil_moisture"]},
-            "npk_model": {"file": "npk_prediction_model.pkl", "type": "tabular_regression_multi", "features": ["ph", "ec", "organic_carbon", "moisture", "temperature", "rainfall"], "outputs": ["N_pred", "P_pred", "K_pred"]},
-            "ndvi_model": {"file": "ndvi_model.pkl", "type": "tabular_regression", "features": ["red_band", "nir_band"]},
-            "stress_model": {"file": "crop_stress_model.pkl", "type": "tabular_classification", "features": ["ndvi", "temperature", "soil_moisture", "humidity"], "encoder": "stress_encoder"},
-            "disease_model": {"file": "plant_disease_model.h5", "type": "image_classification", "classes_file": "disease_classes.pkl"},
-            "leaf_model": {"file": "leaf_classification_model.h5", "type": "image_classification", "classes_file": "leaf_classes.pkl"},
-            "weed_model": {"file": "weed_detection_model.h5", "type": "image_classification", "classes_file": "weed_classes.pkl"},
-            "soil_model": {"file": "soil_classification_model.h5", "type": "image_classification", "classes_file": "soil_classes.pkl"},
-            "nutrient_model": {"file": "nutrient_deficiency_model.h5", "type": "image_classification", "classes_file": "nutrient_classes.pkl"}
-        }
-
-    def _load_encoder_if_exists(self, key, filename):
-        file_path = self.model_path / filename
-        if file_path.exists():
-            try:
-                self.encoders[key] = joblib.load(file_path)
-            except Exception as e:
-                self.load_errors[key] = str(e)
-
-    def _load_all_models(self):
-        self._load_encoder_if_exists("crop_encoder", "crop_label_encoder.pkl")
-        self._load_encoder_if_exists("irrigation_encoder", "irrigation_label_encoder.pkl")
-        self._load_encoder_if_exists("fertilizer_encoder", "fertilizer_label_encoder.pkl")
-        self._load_encoder_if_exists("stress_encoder", "stress_label_encoder.pkl")
-
-        for key, schema in self.schemas.items():
-            model_file = self.model_path / schema["file"]
-
-            if not model_file.exists():
-                self.load_errors[key] = f"Missing file: {schema['file']}"
-                continue
-
-            try:
-                if schema["file"].endswith(".h5"):
-                    if TF_AVAILABLE:
-                        self.models[key] = tf.keras.models.load_model(model_file)
-                    else:
-                        self.load_errors[key] = "TensorFlow not installed; .h5 skipped"
-                        continue
-                else:
-                    self.models[key] = joblib.load(model_file)
-
-                if schema["type"] == "image_classification" and "classes_file" in schema:
-                    cls_file = self.model_path / schema["classes_file"]
-                    if cls_file.exists():
-                        self.class_names[key] = joblib.load(cls_file)
-            except Exception as e:
-                self.load_errors[key] = str(e)
-
-    def has_model(self, model_key):
-        return model_key in self.models
-
-    def model_status(self):
-        rows = []
-        for key, schema in self.schemas.items():
-            loaded = self.has_model(key)
-            reason = "Loaded" if loaded else self.load_errors.get(key, "Not loaded")
-            rows.append({
-                "Model": key,
-                "File": schema["file"],
-                "Status": "Loaded" if loaded else "Missing/Skipped",
-                "Reason": reason
-            })
-        return pd.DataFrame(rows)
-
-    def calculate_ndvi(self, red, nir):
-        red = float(red)
-        nir = float(nir)
-        if (nir + red) == 0:
-            return 0.0
-        return round((nir - red) / (nir + red), 4)
-
-
-class TelanganaAgriModels:
-    def __init__(self):
-        self.crops = {
-            "Kharif": ["Cotton", "Maize", "Red Gram", "Soybean", "Turmeric", "Jowar"],
-            "Rabi": ["Bengal Gram", "Groundnut", "Sesame", "Jowar", "Paddy", "Black Gram"],
-        }
-
-    def predict_crop_recommendation(self, features, season="Kharif"):
-        season_crops = self.crops.get(season, self.crops["Kharif"])
-        score = int(sum(features)) % len(season_crops)
-        crop = season_crops[score]
-        confidence = round(85 + (score % 10), 1)
-        return crop, confidence
-
-    def predict_crop_yield(self, features):
-        ph, temp, rainfall, fert, humidity, moisture = features
-        pred = (temp * 0.65) + (rainfall * 0.03) + (fert * 0.045) + (humidity * 0.075) + (moisture * 0.25) - abs(ph - 6.8) * 2.2
-        return round(max(pred, 0), 2), 88.0
-
-    def predict_irrigation(self, features):
-        moisture, temp, humidity, ph, rainfall = features
-        if rainfall > 150 or moisture > 55:
-            return "Low", "Skip irrigation cycle", 92.0
-        if moisture < 28 and temp > 32:
-            return "High", "Deep irrigation needed", 90.0
-        return "Moderate", "Light irrigation", 89.0
-
-    def predict_fertilizer(self, n, p, k):
-        if n < 50:
-            return "Apply nitrogen fertilizer in split doses", 87.0
-        if p < 40:
-            return "Apply phosphorus fertilizer with basal dose", 86.0
-        if k < 40:
-            return "Apply potash for stress tolerance", 85.0
-        return "Use balanced NPK fertilizer with organic manure", 89.0
-
-    def predict_health_score(self, ndvi, moisture, temp):
-        score = (ndvi * 50) + (moisture * 0.3) + ((35 - abs(temp - 28)) * 0.2)
-        return min(100, max(0, round(score, 1)))
-
-
-class HybridAgriModels:
-    def __init__(self, model_dir="models"):
-        self.real_models = AgritechModels(model_dir)
-        self.demo_models = TelanganaAgriModels()
-
-    def predict_crop_recommendation(self, features, season="Kharif"):
-        return self.demo_models.predict_crop_recommendation(features, season)
-
-    def predict_crop_yield(self, features):
-        return self.demo_models.predict_crop_yield(features)
-
-    def predict_irrigation(self, features):
-        return self.demo_models.predict_irrigation(features)
-
-    def predict_fertilizer(self, n, p, k):
-        return self.demo_models.predict_fertilizer(n, p, k)
-
-    def calculate_ndvi(self, red, nir):
-        return self.real_models.calculate_ndvi(red, nir)
-
-    def predict_health_score(self, ndvi, moisture, temp):
-        return self.demo_models.predict_health_score(ndvi, moisture, temp)
-
-    def model_status(self):
-        return self.real_models.model_status()
-
-
-agrimodels = HybridAgriModels("models")
-
 
 # =========================
 # SESSION STATE
@@ -259,9 +66,178 @@ if "district" not in st.session_state:
 if "season" not in st.session_state:
     st.session_state.season = "Kharif"
 
-if "weather_debug" not in st.session_state:
-    st.session_state.weather_debug = {}
+if "multi_crop_df" not in st.session_state:
+    st.session_state.multi_crop_df = None
 
+if "weather_cache" not in st.session_state:
+    st.session_state.weather_cache = None
+
+# =========================
+# REAL ML LAYER
+# =========================
+@st.cache_resource
+def train_ml_models():
+    crop_names = [
+        "Rice", "Cotton", "Maize", "Wheat", "Sugarcane", "Soybean",
+        "Groundnut", "Chilli", "Turmeric", "Red Gram", "Black Gram",
+        "Green Gram", "Bengal Gram", "Sesame", "Jowar", "Bajra",
+        "Sunflower", "Castor", "Paddy", "Horse Gram"
+    ]
+
+    crop_profiles = {
+        "Rice":      [80, 40, 40, 28, 80, 6.5, 180],
+        "Cotton":    [70, 35, 50, 30, 60, 7.0, 90],
+        "Maize":     [85, 45, 40, 27, 65, 6.7, 110],
+        "Wheat":     [65, 35, 35, 22, 55, 6.8, 60],
+        "Sugarcane": [90, 50, 55, 29, 70, 7.2, 160],
+        "Soybean":   [60, 40, 35, 26, 65, 6.5, 95],
+        "Groundnut": [55, 35, 45, 28, 55, 6.6, 70],
+        "Chilli":    [75, 40, 45, 27, 58, 6.8, 65],
+        "Turmeric":  [70, 45, 50, 26, 75, 6.4, 140],
+        "Red Gram":  [45, 30, 35, 29, 55, 7.0, 75],
+        "Black Gram":[40, 28, 30, 28, 58, 6.9, 70],
+        "Green Gram":[42, 30, 32, 27, 60, 6.8, 68],
+        "Bengal Gram":[38, 26, 28, 24, 50, 7.1, 55],
+        "Sesame":    [35, 22, 28, 29, 50, 6.7, 50],
+        "Jowar":     [48, 28, 30, 30, 52, 7.2, 65],
+        "Bajra":     [45, 24, 26, 31, 48, 7.3, 45],
+        "Sunflower": [58, 34, 38, 27, 54, 6.9, 62],
+        "Castor":    [50, 30, 36, 30, 50, 7.4, 58],
+        "Paddy":     [82, 42, 40, 28, 82, 6.5, 185],
+        "Horse Gram":[30, 20, 22, 28, 46, 7.0, 40]
+    }
+
+    X_crop = []
+    y_crop = []
+
+    for crop in crop_names:
+        base = crop_profiles[crop]
+        for _ in range(35):
+            n = np.clip(np.random.normal(base[0], 8), 10, 120)
+            p = np.clip(np.random.normal(base[1], 6), 10, 80)
+            k = np.clip(np.random.normal(base[2], 6), 10, 80)
+            temp = np.clip(np.random.normal(base[3], 3), 15, 40)
+            humidity = np.clip(np.random.normal(base[4], 8), 30, 95)
+            ph = np.clip(np.random.normal(base[5], 0.4), 4.5, 8.5)
+            rainfall = np.clip(np.random.normal(base[6], 25), 0, 300)
+            X_crop.append([n, p, k, temp, humidity, ph, rainfall])
+            y_crop.append(crop)
+
+    crop_encoder = LabelEncoder()
+    y_crop_enc = crop_encoder.fit_transform(y_crop)
+
+    crop_model = RandomForestClassifier(
+        n_estimators=220,
+        max_depth=14,
+        random_state=42
+    )
+    crop_model.fit(X_crop, y_crop_enc)
+
+    X_yield = []
+    y_yield = []
+
+    crop_factor_map = {crop: i + 1 for i, crop in enumerate(crop_names)}
+
+    for crop in crop_names:
+        crop_factor = crop_factor_map[crop]
+        base = crop_profiles[crop]
+        for _ in range(40):
+            ph = np.clip(np.random.normal(base[5], 0.5), 4.5, 8.5)
+            temp = np.clip(np.random.normal(base[3], 3), 15, 40)
+            rainfall = np.clip(np.random.normal(base[6], 30), 0, 300)
+            fertilizer = np.clip(np.random.normal(base[0], 10), 10, 140)
+            humidity = np.clip(np.random.normal(base[4], 8), 30, 95)
+            soil_moisture = np.clip(np.random.normal(42, 12), 10, 80)
+
+            ideal_penalty = abs(ph - 6.8) * 0.5
+            y = (
+                1.2 + crop_factor * 0.12 + temp * 0.05 + rainfall * 0.01 +
+                fertilizer * 0.015 + humidity * 0.02 + soil_moisture * 0.03 -
+                ideal_penalty + np.random.normal(0, 0.3)
+            )
+            X_yield.append([ph, temp, rainfall, fertilizer, humidity, soil_moisture, crop_factor])
+            y_yield.append(max(0.8, y))
+
+    yield_model = RandomForestRegressor(
+        n_estimators=260,
+        max_depth=16,
+        random_state=42
+    )
+    yield_model.fit(X_yield, y_yield)
+
+    X_irr = []
+    y_irr = []
+    irrigation_classes = ["Low", "Moderate", "High"]
+
+    for _ in range(400):
+        soil_m = np.random.uniform(10, 80)
+        temp = np.random.uniform(15, 40)
+        hum = np.random.uniform(30, 95)
+        ph = np.random.uniform(4.5, 8.5)
+        rain = np.random.uniform(0, 250)
+
+        if rain > 120 or soil_m > 60:
+            label = "Low"
+        elif soil_m < 28 and temp > 30:
+            label = "High"
+        else:
+            label = "Moderate"
+
+        X_irr.append([soil_m, temp, hum, ph, rain])
+        y_irr.append(label)
+
+    irr_encoder = LabelEncoder()
+    y_irr_enc = irr_encoder.fit_transform(y_irr)
+
+    irrigation_model = RandomForestClassifier(
+        n_estimators=180,
+        max_depth=10,
+        random_state=42
+    )
+    irrigation_model.fit(X_irr, y_irr_enc)
+
+    return {
+        "crop_model": crop_model,
+        "crop_encoder": crop_encoder,
+        "yield_model": yield_model,
+        "irrigation_model": irrigation_model,
+        "irrigation_encoder": irr_encoder,
+        "crop_factor_map": crop_factor_map
+    }
+
+ml_bundle = train_ml_models()
+
+# =========================
+# BACKEND-LIKE SERVICE LAYER
+# =========================
+class AgriAPIService:
+    def __init__(self, bundle):
+        self.bundle = bundle
+
+    def recommend_crop(self, features):
+        pred = self.bundle["crop_model"].predict([features])[0]
+        crop = self.bundle["crop_encoder"].inverse_transform([pred])[0]
+        probs = self.bundle["crop_model"].predict_proba([features])[0]
+        conf = round(float(np.max(probs)) * 100, 2)
+        return crop, conf
+
+    def predict_yield(self, ph, temp, rainfall, fertilizer, humidity, soil_moisture, crop_name):
+        crop_factor = self.bundle["crop_factor_map"].get(crop_name, 1)
+        pred = self.bundle["yield_model"].predict([[ph, temp, rainfall, fertilizer, humidity, soil_moisture, crop_factor]])[0]
+        return round(float(pred), 2)
+
+    def predict_irrigation(self, soil_moisture, temp, humidity, ph, rainfall):
+        pred = self.bundle["irrigation_model"].predict([[soil_moisture, temp, humidity, ph, rainfall]])[0]
+        label = self.bundle["irrigation_encoder"].inverse_transform([pred])[0]
+        if label == "Low":
+            action = "Skip irrigation cycle"
+        elif label == "High":
+            action = "Deep irrigation needed"
+        else:
+            action = "Light irrigation"
+        return label, action
+
+api_service = AgriAPIService(ml_bundle)
 
 # =========================
 # HELPERS
@@ -272,81 +248,178 @@ def get_openweather_api_key():
             return st.secrets["OPENWEATHER_API_KEY"]
     except Exception:
         pass
-    env_key = os.getenv("OPENWEATHER_API_KEY", "").strip()
-    if env_key:
-        return env_key
-    return OPENWEATHER_API_KEY.strip()
-
+    return OPENWEATHER_API_KEY
 
 def fetch_weather(city):
     api_key = get_openweather_api_key()
 
-    debug_info = {
-        "city": city,
-        "api_key_present": bool(api_key and api_key != "YOUR_OPENWEATHER_API_KEY"),
-        "status": "",
-        "reason": ""
-    }
-
     if not api_key or api_key == "YOUR_OPENWEATHER_API_KEY":
-        debug_info["status"] = "missing_api_key"
-        debug_info["reason"] = "Please set OPENWEATHER_API_KEY"
-        return None, debug_info
+        return None
 
     try:
         url = "https://api.openweathermap.org/data/2.5/weather"
         params = {"q": city, "appid": api_key, "units": "metric"}
-        response = requests.get(url, params=params, timeout=15)
-        debug_info["http_status"] = response.status_code
-
+        response = requests.get(url, params=params, timeout=12)
         if response.status_code == 200:
             data = response.json()
-            debug_info["status"] = "success"
-            debug_info["reason"] = ""
-            weather = {
+            return {
                 "temperature": float(data["main"]["temp"]),
                 "humidity": float(data["main"]["humidity"]),
                 "rainfall": float(data.get("rain", {}).get("1h", 0.0)),
                 "weather": data["weather"][0]["main"]
             }
-            return weather, debug_info
-
-        debug_info["status"] = "api_error"
-        debug_info["reason"] = response.text[:300]
-        return None, debug_info
-
-    except Exception as e:
-        debug_info["status"] = "exception"
-        debug_info["reason"] = str(e)
-        return None, debug_info
-
-
-def get_gemini_api_key():
-    try:
-        if "GEMINI_API_KEY" in st.secrets:
-            return st.secrets["GEMINI_API_KEY"]
+        return None
     except Exception:
-        pass
-    env_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if env_key:
-        return env_key
-    return GEMINI_API_KEY.strip()
+        return None
 
+def get_weather_data(city):
+    weather = fetch_weather(city)
+    if weather is None:
+        st.warning("Weather API not available. Using manual defaults.")
+        return {
+            "temperature": 29.0,
+            "humidity": 78.0,
+            "rainfall": 20.0,
+            "weather": "Default"
+        }
+    return weather
 
-def structured_chat_reply(question, farm_data):
-    if not farm_data:
+def calculate_ndvi(red, nir):
+    red = float(red)
+    nir = float(nir)
+    if (nir + red) == 0:
+        return 0.0
+    return round((nir - red) / (nir + red), 4)
+
+def predict_health_score(ndvi, moisture, temp):
+    score = (ndvi * 50) + (moisture * 0.3) + ((35 - abs(temp - 28)) * 0.2)
+    return min(100, max(0, round(score, 1)))
+
+def fertilizer_advice(n, p, k):
+    if n < 50:
+        return "Apply nitrogen fertilizer in split doses", 87.0
+    if p < 40:
+        return "Apply phosphorus fertilizer with basal dose", 86.0
+    if k < 40:
+        return "Apply potash for stress tolerance", 85.0
+    return "Use balanced NPK fertilizer with organic manure", 89.0
+
+def generate_ndvi_trend(ndvi):
+    return pd.DataFrame({
+        "Day": [f"Day {i}" for i in range(1, 8)],
+        "NDVI": [max(0.1, round(ndvi - 0.05 + (i * 0.008), 3)) for i in range(1, 8)]
+    })
+
+def soil_radar_figure(n, p, k, moisture, ph):
+    radar_df = pd.DataFrame({
+        "Metric": ["Nitrogen", "Phosphorus", "Potassium", "Moisture", "pH x10"],
+        "Value": [n, p, k, moisture, ph * 10]
+    })
+    fig = px.line_polar(radar_df, r="Value", theta="Metric", line_close=True, title="Soil Radar Chart")
+    fig.update_traces(fill="toself")
+    return fig
+
+def smart_alerts(health, ndvi, n, p, k):
+    alerts = []
+    if health < 40:
+        alerts.append(("high", "🚨 High risk: poor farm health detected"))
+    if ndvi < 0.35:
+        alerts.append(("med", "⚠ Low NDVI detected"))
+    if n < 40 or p < 30 or k < 30:
+        alerts.append(("med", "⚠ Soil imbalance detected"))
+    if not alerts:
+        alerts.append(("good", "✅ Farm looks stable"))
+    return alerts
+
+def generate_farm_report(farm_data, multi_crop_df=None):
+    lines = []
+    lines.append("AGRI VISION AI - FARM REPORT")
+    lines.append("=" * 50)
+    if farm_data:
+        lines.append(f"District: {farm_data.get('district', 'N/A')}")
+        lines.append(f"Season: {farm_data.get('season', 'N/A')}")
+        lines.append(f"Crop: {farm_data.get('crop', 'N/A')}")
+        lines.append(f"Yield: {farm_data.get('yield', 'N/A')} t/ha")
+        lines.append(f"Risk/Health: {farm_data.get('health', 'N/A')}%")
+        lines.append(f"NDVI: {farm_data.get('ndvi', 'N/A')}")
+        lines.append(f"Irrigation: {farm_data.get('irrigation', 'N/A')}")
+        lines.append(f"Action: {farm_data.get('action', 'N/A')}")
+        lines.append(f"Fertilizer Advice: {farm_data.get('fertilizer', 'N/A')}")
+    if multi_crop_df is not None and not multi_crop_df.empty:
+        lines.append("")
+        lines.append("MULTI-CROP ANALYSIS")
+        lines.append(multi_crop_df.to_string(index=False))
+    return "\n".join(lines)
+
+def wow_feature_box():
+    st.markdown("""
+    <div class="wow-box">
+    🚀 WOW FEATURE: Recruiter Mode — this app combines real weather integration, trained ML models, multi-crop comparison,
+    smart alerts, downloadable farm reports, and structured advisory flow in one agritech dashboard.
+    </div>
+    """, unsafe_allow_html=True)
+
+def chatbot_reply(question, farm_data):
+    q = question.lower()
+
+    if farm_data is None:
         return """
 ### Situation
-- No farm analysis available yet.
+- No farm analysis data available yet.
 
 ### Why
-- Chat memory works best after running Smart Advisor.
+- The assistant becomes more accurate after Smart Advisor or Multi-Crop Analysis runs.
 
 ### Immediate Action
 - Run Smart Advisor first.
 
 ### Next 3 Days
-- Track weather, moisture, and crop suitability.
+- Track weather, NDVI, irrigation, and nutrient balance.
+""".strip()
+
+    if "best crop" in q:
+        return f"""
+### Situation
+- Current recommended crop is {farm_data.get('crop')}.
+
+### Why
+- This recommendation is based on trained crop classification using N, P, K, temperature, humidity, pH, and rainfall.
+
+### Immediate Action
+- Prioritize {farm_data.get('crop')} for the current farm condition.
+
+### Next 3 Days
+- Monitor NDVI, soil moisture, and rainfall before final sowing.
+""".strip()
+
+    if "irrigation" in q:
+        return f"""
+### Situation
+- Irrigation level is {farm_data.get('irrigation')}.
+
+### Why
+- The irrigation model uses soil moisture, temperature, humidity, pH, and rainfall.
+
+### Immediate Action
+- {farm_data.get('action')}.
+
+### Next 3 Days
+- Check rainfall updates and keep moisture above the safe threshold.
+""".strip()
+
+    if "fertilizer" in q:
+        return f"""
+### Situation
+- Current fertilizer advice is: {farm_data.get('fertilizer')}.
+
+### Why
+- Nutrient balance affects crop stress, yield, and canopy growth.
+
+### Immediate Action
+- Follow the fertilizer plan in split doses if needed.
+
+### Next 3 Days
+- Recheck soil nutrient values and compare with crop stage.
 """.strip()
 
     return f"""
@@ -354,33 +427,28 @@ def structured_chat_reply(question, farm_data):
 - District: {farm_data.get('district')}
 - Season: {farm_data.get('season')}
 - Recommended crop: {farm_data.get('crop')}
-- Irrigation: {farm_data.get('irrigation')}
-- Action: {farm_data.get('action')}
-- Expected yield: {farm_data.get('yield')} t/ha
+- Yield: {farm_data.get('yield')} t/ha
 - NDVI: {farm_data.get('ndvi')}
-- Health score: {farm_data.get('health')}%
-- Fertilizer: {farm_data.get('fertilizer')}
+- Health: {farm_data.get('health')}%
 
 ### Why
-- Current soil, weather, and moisture conditions influence crop choice and yield.
+- The app combines weather, nutrient, and moisture conditions with trained ML predictions.
 
 ### Immediate Action
-- Follow irrigation and fertilizer advice based on the latest analysis.
+- Follow irrigation and fertilizer guidance.
 
 ### Next 3 Days
-- Monitor NDVI trend, rainfall, and soil moisture.
+- Track weather change, NDVI trend, and crop stress.
 
-### User Question
+### Your Question
 - {question}
 """.strip()
-
 
 def process_image(uploaded_file):
     image = Image.open(uploaded_file).convert("RGB")
     image = image.resize((224, 224))
     arr = np.array(image, dtype=np.float32)
     return image, arr
-
 
 def render_header():
     st.markdown(
@@ -389,7 +457,7 @@ def render_header():
             <div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;'>
                 <div>
                     <h1 class="farm-title">AgriVision AI</h1>
-                    <p class="subtitle">Farm Health AI</p>
+                    <p class="subtitle">Farm Health AI + Real ML + Weather + Smart Alerts</p>
                 </div>
                 <div style='text-align:right;'>
                     <div><span class="badge-good">Telangana Edition</span></div>
@@ -401,7 +469,6 @@ def render_header():
         unsafe_allow_html=True,
     )
 
-
 def render_top_dashboard():
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -409,10 +476,9 @@ def render_top_dashboard():
     with c2:
         st.markdown("<div class='metric-card'><div class='small-muted'>Active Alerts</div><h2 style='color:#dc2626;'>4</h2><div class='small-muted'>2 critical zones</div></div>", unsafe_allow_html=True)
     with c3:
-        st.markdown("<div class='metric-card'><div class='small-muted'>Yield Forecast</div><h2 style='color:#166534;'>4.2 t/ha</h2><div class='small-muted'>On target</div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='metric-card'><div class='small-muted'>Yield Forecast</div><h2 style='color:#166534;'>4.2 t/ha</h2><div class='small-muted'>AI powered</div></div>", unsafe_allow_html=True)
     with c4:
-        st.markdown("<div class='metric-card'><div class='small-muted'>Soil Moisture</div><h2 style='color:#2563eb;'>62%</h2><div class='small-muted'>Optimal</div></div>", unsafe_allow_html=True)
-
+        st.markdown("<div class='metric-card'><div class='small-muted'>Weather Feed</div><h2 style='color:#2563eb;'>Live/API</h2><div class='small-muted'>Fallback safe</div></div>", unsafe_allow_html=True)
 
 # =========================
 # SIDEBAR
@@ -438,32 +504,25 @@ page = st.sidebar.radio(
 st.sidebar.markdown("### Telangana Filters")
 st.session_state.district = st.sidebar.selectbox(
     "District",
-    ["Hyderabad", "Ranga Reddy", "Medchal", "Sangareddy", "Mahabubnagar"]
+    [
+        "Hyderabad", "Adilabad", "Bhadradri Kothagudem", "Hanamkonda", "Jagtial",
+        "Jangaon", "Jayashankar Bhupalpally", "Jogulamba Gadwal", "Kamareddy",
+        "Karimnagar", "Khammam", "Komaram Bheem Asifabad", "Mahabubabad",
+        "Mahabubnagar", "Mancherial", "Medak", "Medchal-Malkajgiri", "Mulugu",
+        "Nagarkurnool", "Nalgonda", "Narayanpet", "Nirmal", "Nizamabad",
+        "Peddapalli", "Rajanna Sircilla", "Ranga Reddy", "Sangareddy",
+        "Siddipet", "Suryapet", "Vikarabad", "Wanaparthy", "Warangal",
+        "Yadadri Bhuvanagiri"
+    ]
 )
 st.session_state.season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"])
 
-st.sidebar.markdown("### Model Engine")
-if TF_AVAILABLE:
-    st.sidebar.markdown("<span class='model-ok'>TensorFlow optional support ON</span>", unsafe_allow_html=True)
-else:
-    st.sidebar.markdown("<span class='model-miss'>TensorFlow unavailable, .h5 skipped</span>", unsafe_allow_html=True)
-
-with st.sidebar.expander("Loaded Models Status", expanded=False):
-    status_df = agrimodels.model_status()
-    st.dataframe(status_df, hide_index=True)
-
-weather_data, debug_info = fetch_weather(st.session_state.district)
-st.session_state.weather_debug = debug_info
-
-with st.sidebar.expander("Weather API Debug", expanded=False):
-    st.json(st.session_state.weather_debug)
-
 render_header()
 render_top_dashboard()
-
+wow_feature_box()
 
 # =========================
-# PAGE ROUTING
+# PAGES
 # =========================
 if page == "Dashboard":
     st.markdown("## Farm Health Overview")
@@ -490,19 +549,23 @@ if page == "Dashboard":
         fig_pie.update_layout(height=360, template="plotly_white")
         st.plotly_chart(fig_pie, use_container_width=True)
 
+    heatmap_df = pd.DataFrame({
+        "Zone": ["Zone A", "Zone B", "Zone C", "Zone D"],
+        "NDVI": [0.71, 0.54, 0.39, 0.62],
+        "Moisture": [48, 36, 22, 43]
+    })
+    st.plotly_chart(px.scatter(
+        heatmap_df, x="NDVI", y="Moisture", color="Zone", size="Moisture",
+        title="Zone-wise NDVI vs Soil Moisture"
+    ), use_container_width=True)
+
 elif page == "Smart Advisor":
     st.markdown("## Smart Farm Advisor")
 
-    if weather_data:
-        st.success(f"Live weather loaded for {st.session_state.district}")
-        temp_default = weather_data["temperature"]
-        humidity_default = weather_data["humidity"]
-        rainfall_default = weather_data["rainfall"]
-    else:
-        st.warning("Weather API not available. Using manual defaults.")
-        temp_default = 29.0
-        humidity_default = 78.0
-        rainfall_default = 180.0
+    weather_data = get_weather_data(st.session_state.district)
+    temp = weather_data["temperature"]
+    humidity = weather_data["humidity"]
+    rainfall = weather_data["rainfall"]
 
     a, b, c = st.columns(3)
 
@@ -513,12 +576,9 @@ elif page == "Smart Advisor":
         ph = st.number_input("Soil pH", value=6.7)
 
     with b:
-        st.number_input("Temperature (°C)", value=float(temp_default), disabled=True)
-        st.number_input("Humidity (%)", value=float(humidity_default), disabled=True)
-        st.number_input("Rainfall (mm)", value=float(rainfall_default), disabled=True)
-        temp = temp_default
-        humidity = humidity_default
-        rainfall = rainfall_default
+        st.number_input("Temperature (°C)", value=float(temp), disabled=True)
+        st.number_input("Humidity (%)", value=float(humidity), disabled=True)
+        st.number_input("Rainfall (mm)", value=float(rainfall), disabled=True)
 
     with c:
         moisture = st.number_input("Soil Moisture (%)", value=42.0)
@@ -526,12 +586,12 @@ elif page == "Smart Advisor":
         nir = st.number_input("NIR Band", min_value=0.0, max_value=1.0, value=0.72)
 
     if st.button("Run Analysis", type="primary", use_container_width=True):
-        crop, crop_conf = agrimodels.predict_crop_recommendation([n, p, k, temp, humidity, ph, rainfall], st.session_state.season)
-        irrigation, action, irr_conf = agrimodels.predict_irrigation([moisture, temp, humidity, ph, rainfall])
-        yield_pred, yield_conf = agrimodels.predict_crop_yield([ph, temp, rainfall, n, humidity, moisture])
-        ndvi = agrimodels.calculate_ndvi(red, nir)
-        health = agrimodels.predict_health_score(ndvi, moisture, temp)
-        fert, fert_conf = agrimodels.predict_fertilizer(n, p, k)
+        crop, crop_conf = api_service.recommend_crop([n, p, k, temp, humidity, ph, rainfall])
+        irrigation, action = api_service.predict_irrigation(moisture, temp, humidity, ph, rainfall)
+        yield_pred = api_service.predict_yield(ph, temp, rainfall, n, humidity, moisture, crop)
+        ndvi = calculate_ndvi(red, nir)
+        health = predict_health_score(ndvi, moisture, temp)
+        fert, fert_conf = fertilizer_advice(n, p, k)
 
         st.session_state.latest_farm_data = {
             "district": st.session_state.district,
@@ -548,7 +608,7 @@ elif page == "Smart Advisor":
         x1, x2, x3 = st.columns(3)
         x1.metric("Crop", crop, f"{crop_conf}% confidence")
         x2.metric("Irrigation", irrigation, action)
-        x3.metric("Yield", f"{yield_pred} t/ha", f"{yield_conf}% confidence")
+        x3.metric("Yield", f"{yield_pred} t/ha", "Real ML prediction")
 
         st.markdown(
             f"<div class='health-card'><h3>Final Farm Decision</h3>"
@@ -560,47 +620,83 @@ elif page == "Smart Advisor":
             unsafe_allow_html=True
         )
 
-elif page == "Multi-Crop Analysis":
-    st.subheader("🌾 Crop Selection")
+        st.markdown("### Smart Alerts")
+        for alert_type, alert_text in smart_alerts(health, ndvi, n, p, k):
+            if alert_type == "high":
+                st.markdown(f"<div class='alert-high'>{alert_text}</div>", unsafe_allow_html=True)
+            elif alert_type == "med":
+                st.markdown(f"<div class='alert-med'>{alert_text}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='alert-good'>{alert_text}</div>", unsafe_allow_html=True)
 
-    crop_list = [
-        "Rice", "Cotton", "Maize", "Wheat", "Sugarcane",
-        "Soybean", "Groundnut", "Chilli", "Turmeric"
+        st.markdown("### Advanced Visualization")
+        ndvi_trend_df = generate_ndvi_trend(ndvi)
+        st.plotly_chart(px.line(ndvi_trend_df, x="Day", y="NDVI", markers=True, title="NDVI Trend Chart"), use_container_width=True)
+
+        st.plotly_chart(soil_radar_figure(n, p, k, moisture, ph), use_container_width=True)
+
+        report_text = generate_farm_report(st.session_state.latest_farm_data, st.session_state.multi_crop_df)
+        st.download_button("Download Farm Report", data=report_text, file_name="farm_report.txt", mime="text/plain")
+
+elif page == "Multi-Crop Analysis":
+    st.subheader("🌾 Multi-Crop Analysis - Telangana Crops")
+
+    weather_data = get_weather_data(st.session_state.district)
+    temp = weather_data["temperature"]
+    humidity = weather_data["humidity"]
+    rainfall = weather_data["rainfall"]
+
+    telangana_crops = [
+        "Rice", "Cotton", "Maize", "Wheat", "Sugarcane", "Soybean", "Groundnut",
+        "Chilli", "Turmeric", "Red Gram", "Black Gram", "Green Gram",
+        "Bengal Gram", "Sesame", "Jowar", "Bajra", "Sunflower",
+        "Castor", "Paddy", "Horse Gram"
     ]
 
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        n = st.number_input("Nitrogen (N)", value=80.0, key="mc_n")
+        p = st.number_input("Phosphorus (P)", value=40.0, key="mc_p")
+        k = st.number_input("Potassium (K)", value=40.0, key="mc_k")
+    with c2:
+        ph = st.number_input("Soil pH", value=6.8, key="mc_ph")
+        moisture = st.number_input("Soil Moisture (%)", value=42.0, key="mc_m")
+    with c3:
+        st.number_input("Temperature (°C)", value=float(temp), disabled=True, key="mc_t")
+        st.number_input("Humidity (%)", value=float(humidity), disabled=True, key="mc_h")
+        st.number_input("Rainfall (mm)", value=float(rainfall), disabled=True, key="mc_r")
+
     selected_crops = st.multiselect(
-        "Select crops to analyze",
-        crop_list,
-        default=["Rice"]
+        "Select multiple Telangana crops",
+        telangana_crops,
+        default=["Rice", "Cotton", "Maize"]
     )
 
     if selected_crops:
         results = []
-
         for crop in selected_crops:
-            yield_pred = round(20 + len(crop) * 1.5, 2)
-            risk = "High" if yield_pred < 25 else "Low"
-
+            yield_pred = api_service.predict_yield(ph, temp, rainfall, n, humidity, moisture, crop)
+            risk = "High" if yield_pred < 3 else ("Moderate" if yield_pred < 5 else "Low")
+            suitability_score = round(min(99, max(40, (yield_pred * 12))), 1)
             results.append({
                 "Crop": crop,
                 "Predicted Yield": yield_pred,
-                "Risk": risk
+                "Risk": risk,
+                "Suitability Score": suitability_score,
+                "Temperature": temp,
+                "Humidity": humidity,
+                "Rainfall": rainfall
             })
 
         df = pd.DataFrame(results)
+        st.session_state.multi_crop_df = df
+
         st.dataframe(df, use_container_width=True)
 
-        fig = px.bar(
-            df,
-            x="Crop",
-            y="Predicted Yield",
-            color="Risk",
-            title="🌾 Crop Yield Comparison"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        best_crop = df.sort_values("Predicted Yield", ascending=False).iloc[0]
+        st.success(f"🏆 Best Crop: {best_crop['Crop']} with {best_crop['Predicted Yield']} t/ha")
 
         cols = st.columns(len(selected_crops))
-
         for i, crop in enumerate(selected_crops):
             cols[i].metric(
                 label=crop,
@@ -608,93 +704,227 @@ elif page == "Multi-Crop Analysis":
                 delta=df.iloc[i]['Risk']
             )
 
-        best_crop = df.sort_values("Predicted Yield", ascending=False).iloc[0]
-        st.success(f"🏆 Best Crop: {best_crop['Crop']} with {best_crop['Predicted Yield']} t/ha")
+        st.markdown("### Advanced Visualization")
 
-    else:
-        st.warning("Please select at least one crop to analyze.")
+        fig_yield = px.bar(
+            df,
+            x="Crop",
+            y="Predicted Yield",
+            color="Risk",
+            title="Yield Comparison Graph"
+        )
+        st.plotly_chart(fig_yield, use_container_width=True)
+
+        fig_scatter = px.scatter(
+            df,
+            x="Suitability Score",
+            y="Predicted Yield",
+            color="Risk",
+            size="Predicted Yield",
+            hover_name="Crop",
+            title="Suitability vs Yield Plot"
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+
+        fig_line = px.line(
+            df.sort_values("Predicted Yield", ascending=False),
+            x="Crop",
+            y="Predicted Yield",
+            markers=True,
+            title="Yield Ranking Trend"
+        )
+        st.plotly_chart(fig_line, use_container_width=True)
+
+        report_text = generate_farm_report(st.session_state.latest_farm_data, df)
+        st.download_button("Download Farm Report", data=report_text, file_name="multi_crop_farm_report.txt", mime="text/plain")
 
 elif page == "Crop Recommendation":
-    vals = [st.number_input(f"Feature {i+1}", value=float(80 + i), key=f"cr_{i}") for i in range(7)]
+    st.markdown("## Crop Recommendation")
+    weather_data = get_weather_data(st.session_state.district)
+
+    n = st.number_input("Nitrogen (N)", value=80.0, key="cr_n")
+    p = st.number_input("Phosphorus (P)", value=40.0, key="cr_p")
+    k = st.number_input("Potassium (K)", value=40.0, key="cr_k")
+    ph = st.number_input("Soil pH", value=6.8, key="cr_ph")
+    st.number_input("Temperature (°C)", value=float(weather_data["temperature"]), disabled=True, key="cr_t")
+    st.number_input("Humidity (%)", value=float(weather_data["humidity"]), disabled=True, key="cr_h")
+    st.number_input("Rainfall (mm)", value=float(weather_data["rainfall"]), disabled=True, key="cr_r")
+
     if st.button("Recommend Crop", use_container_width=True):
-        crop, conf = agrimodels.predict_crop_recommendation(vals, st.session_state.season)
+        crop, conf = api_service.recommend_crop([n, p, k, weather_data["temperature"], weather_data["humidity"], ph, weather_data["rainfall"]])
         st.success(f"Recommended crop: {crop} ({conf}% confidence)")
 
 elif page == "Yield Prediction":
-    vals = [st.number_input(f"Input {i+1}", value=25.0 + i, key=f"yp_{i}") for i in range(6)]
+    st.markdown("## Yield Prediction")
+    weather_data = get_weather_data(st.session_state.district)
+
+    ph = st.number_input("Soil pH", value=6.8, key="yp_ph")
+    fertilizer = st.number_input("Fertilizer Input", value=80.0, key="yp_f")
+    soil_moisture = st.number_input("Soil Moisture", value=42.0, key="yp_sm")
+    crop_name = st.selectbox("Crop", [
+        "Rice", "Cotton", "Maize", "Wheat", "Sugarcane", "Soybean", "Groundnut",
+        "Chilli", "Turmeric", "Red Gram", "Black Gram", "Green Gram",
+        "Bengal Gram", "Sesame", "Jowar", "Bajra", "Sunflower",
+        "Castor", "Paddy", "Horse Gram"
+    ])
+
     if st.button("Predict Yield", use_container_width=True):
-        y, conf = agrimodels.predict_crop_yield(vals)
-        st.metric("Expected Yield", f"{y} t/ha", f"{conf}% confidence")
+        y = api_service.predict_yield(
+            ph,
+            weather_data["temperature"],
+            weather_data["rainfall"],
+            fertilizer,
+            weather_data["humidity"],
+            soil_moisture,
+            crop_name
+        )
+        st.metric("Expected Yield", f"{y} t/ha", "RandomForest prediction")
+
+        chart_df = pd.DataFrame({
+            "Feature": ["Temperature", "Humidity", "Rainfall", "Soil Moisture", "Fertilizer"],
+            "Value": [weather_data["temperature"], weather_data["humidity"], weather_data["rainfall"], soil_moisture, fertilizer]
+        })
+        st.plotly_chart(px.bar(chart_df, x="Feature", y="Value", color="Feature", title="Yield Input Feature Chart"), use_container_width=True)
 
 elif page == "Irrigation":
-    vals = [st.number_input(f"Parameter {i+1}", value=40.0 + i, key=f"ir_{i}") for i in range(5)]
+    st.markdown("## Irrigation Planning")
+    weather_data = get_weather_data(st.session_state.district)
+
+    moisture = st.number_input("Soil Moisture (%)", value=42.0, key="ir_m")
+    ph = st.number_input("Soil pH", value=6.8, key="ir_ph")
+
     if st.button("Get Irrigation Plan", use_container_width=True):
-        result, action, conf = agrimodels.predict_irrigation(vals)
-        st.info(f"Need: {result} | Action: {action} | Confidence: {conf}%")
+        result, action = api_service.predict_irrigation(
+            moisture,
+            weather_data["temperature"],
+            weather_data["humidity"],
+            ph,
+            weather_data["rainfall"]
+        )
+        st.info(f"Need: {result} | Action: {action}")
+
+        irr_df = pd.DataFrame({
+            "Metric": ["Soil Moisture", "Temperature", "Humidity", "Rainfall"],
+            "Value": [moisture, weather_data["temperature"], weather_data["humidity"], weather_data["rainfall"]]
+        })
+        st.plotly_chart(px.line(irr_df, x="Metric", y="Value", markers=True, title="Irrigation Driver Plot"), use_container_width=True)
 
 elif page == "Fertilizer & Soil":
+    st.markdown("## Fertilizer & Soil Analysis")
+
     n = st.number_input("Nitrogen", value=45.0, key="fs_n")
     p = st.number_input("Phosphorus", value=38.0, key="fs_p")
     k = st.number_input("Potassium", value=42.0, key="fs_k")
+    moisture = st.number_input("Soil Moisture", value=41.0, key="fs_m")
+    ph = st.number_input("Soil pH", value=6.7, key="fs_ph")
 
     if st.button("Analyze Soil", use_container_width=True):
-        fert, conf = agrimodels.predict_fertilizer(n, p, k)
+        fert, conf = fertilizer_advice(n, p, k)
         df = pd.DataFrame({"Nutrient": ["N", "P", "K"], "Value": [n, p, k]})
         fig = px.bar(df, x="Nutrient", y="Value", color="Nutrient", title="Soil Nutrient Levels")
         st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(soil_radar_figure(n, p, k, moisture, ph), use_container_width=True)
         st.success(f"Recommendation: {fert} ({conf}% confidence)")
 
 elif page == "NDVI Analysis":
+    st.markdown("## NDVI Analysis")
+
     red = st.slider("Red Band", 0.0, 1.0, 0.30)
     nir = st.slider("NIR Band", 0.0, 1.0, 0.72)
     temp = st.slider("Temperature", 15.0, 45.0, 29.0)
     moisture = st.slider("Soil Moisture", 10.0, 80.0, 42.0)
 
     if st.button("Calculate NDVI", use_container_width=True):
-        ndvi = agrimodels.calculate_ndvi(red, nir)
-        health = agrimodels.predict_health_score(ndvi, moisture, temp)
-        gauge = go.Figure(go.Indicator(mode="gauge+number", value=health, title={'text': "Health Score"}, gauge={'axis': {'range': [0, 100]}}))
+        ndvi = calculate_ndvi(red, nir)
+        health = predict_health_score(ndvi, moisture, temp)
+
+        gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=health,
+            title={'text': "Health Score"},
+            gauge={'axis': {'range': [0, 100]}}
+        ))
         gauge.update_layout(height=350)
         st.plotly_chart(gauge, use_container_width=True)
+
+        ndvi_trend_df = generate_ndvi_trend(ndvi)
+        st.plotly_chart(px.line(ndvi_trend_df, x="Day", y="NDVI", markers=True, title="NDVI Trend Chart"), use_container_width=True)
+
         st.success(f"NDVI: {ndvi} | Health score: {health}%")
 
 elif page == "Disease Detection":
+    st.markdown("## Disease Detection")
     uploaded_file = st.file_uploader("Upload crop leaf image", type=["jpg", "jpeg", "png"])
+
     if uploaded_file:
         image, arr = process_image(uploaded_file)
         st.image(image, caption="Uploaded leaf image", use_container_width=True)
+
         if st.button("Analyze Disease", use_container_width=True):
             avg_val = int(np.mean(arr)) % 4
             labels = ["Healthy", "Leaf Blight", "Rust", "Leaf Spot"]
             confidence = round(0.80 + (avg_val * 0.03), 2)
             st.warning(f"Predicted condition: {labels[avg_val]} (confidence: {round(confidence * 100, 2)}%)")
 
+            disease_df = pd.DataFrame({
+                "Condition": labels,
+                "Score": [32, 18, 24, 26]
+            })
+            st.plotly_chart(px.pie(disease_df, names="Condition", values="Score", title="Disease Risk Distribution"), use_container_width=True)
+
 elif page == "AI Assistant":
+    st.markdown("## AI Assistant")
+
     toolbar_text = (
         f"💬 AgriVision AI Chat | 📍 {st.session_state.district} | 🌾 {st.session_state.season} | "
         + ("✅ Smart Advisor data loaded" if st.session_state.latest_farm_data else "⚠️ Run Smart Advisor for personalized context")
     )
-
     st.markdown(f"<div class='chat-toolbar'>{toolbar_text}</div>", unsafe_allow_html=True)
-    st.write("DEBUG KEY:", get_gemini_api_key())
+
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        if st.button("Suggest best crop"):
+            st.session_state.chat_history.append({"role": "user", "content": "Suggest best crop"})
+    with s2:
+        if st.button("Irrigation advice"):
+            st.session_state.chat_history.append({"role": "user", "content": "Give irrigation advice"})
+    with s3:
+        if st.button("Fertilizer advice"):
+            st.session_state.chat_history.append({"role": "user", "content": "Give fertilizer advice"})
 
     for message in st.session_state.chat_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask about irrigation, crop, disease, fertilizer, or Telangana farming..."):
+    if prompt := st.chat_input("Ask about irrigation, crop, disease, fertilizer, weather, or Telangana farming..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
     if st.session_state.chat_history:
         last_message = st.session_state.chat_history[-1]
         if last_message["role"] == "user":
-            reply = structured_chat_reply(last_message["content"], st.session_state.latest_farm_data)
+            try:
+                reply = chatbot_reply(last_message["content"], st.session_state.latest_farm_data)
+            except Exception:
+                reply = """
+### Situation
+- Assistant fallback mode activated.
+
+### Why
+- A temporary chatbot issue occurred.
+
+### Immediate Action
+- Use Smart Advisor outputs shown on screen.
+
+### Next 3 Days
+- Retry the question after running the latest analysis.
+""".strip()
+
             st.session_state.chat_history.append({"role": "assistant", "content": reply})
             with st.chat_message("assistant"):
                 st.markdown(reply)
 
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Multi-Crop Analysis added without removing previous app sections</div>",
+    "<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 AgriVision AI | Telangana Edition | Real ML + Multi-Crop + Weather + Smart Alerts + Farm Report</div>",
     unsafe_allow_html=True
 )
