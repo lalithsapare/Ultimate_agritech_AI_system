@@ -1,6 +1,12 @@
 streamlit
+fastapi
+uvicorn
 pandas
 numpy
 plotly
 pillow
+requests
 openai
+shap
+scikit-learn
+reportlab
