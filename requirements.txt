@@ -1,10 +1,2 @@
-
-joblib
-numpy
-pandas
-plotly
-pillow
-tensorflow
 streamlit==1.56.0
-google-genai
 google-generativeai==0.8.6
