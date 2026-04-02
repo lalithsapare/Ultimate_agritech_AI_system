@@ -6,13 +6,6 @@ import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image
 
-try:
-    import tensorflow as tf
-    TF_AVAILABLE = True
-except Exception:
-    TF_AVAILABLE = False
-
-
 st.set_page_config(
     page_title="AgriVision AI",
     page_icon="🌾",
@@ -22,20 +15,19 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.main {background: linear-gradient(135deg, #0b1220 0%, #07111f 100%);}
+.main {background: linear-gradient(135deg, #08111f 0%, #020817 100%);}
 .block-container {padding-top: 1rem; padding-bottom: 1rem;}
-[data-testid="stSidebar"] {background: linear-gradient(180deg, #166534 0%, #166534 50%, #14532d 100%);}
+[data-testid="stSidebar"] {background: linear-gradient(180deg, #166534 0%, #166534 55%, #14532d 100%);}
 [data-testid="stSidebar"] * {color: white !important;}
 .hero-dashboard {background: linear-gradient(90deg, #166534, #22c55e, #16a34a); color: white; padding: 1.8rem 1.5rem; border-radius: 24px; box-shadow: 0 12px 32px rgba(22, 101, 52, 0.3); margin-bottom: 1.5rem;}
 .metric-card {background: rgba(255,255,255,0.96); border-radius: 20px; padding: 1.4rem; text-align: center; border: 1px solid #dcfce7; box-shadow: 0 8px 24px rgba(0,0,0,0.12);}
-.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 6px solid #16a34a; border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15); color: #14532d;}
+.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15); color: #14532d;}
 .chat-toolbar {background: rgba(255,255,255,0.96); border-radius: 16px; padding: 1rem 1.2rem; border: 1px solid #dcfce7; margin-bottom: 1rem; color: #14532d;}
 .farm-title {font-size: 2.35rem; font-weight: 800; margin: 0;}
 .subtitle {margin: 0.4rem 0 0 0; font-size: 1.05rem; opacity: 0.96;}
 .small-muted {color: #64748b; font-size: 0.9rem;}
 .badge-good {background: #dcfce7; color: #166534; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700;}
-.model-ok {background:#dcfce7;color:#166534;padding:0.35rem 0.55rem;border-radius:999px;font-size:0.75rem;font-weight:700;display:inline-block;margin-bottom:0.35rem;}
-.model-miss {background:#fee2e2;color:#b91c1c;padding:0.35rem 0.55rem;border-radius:999px;font-size:0.75rem;font-weight:700;display:inline-block;margin-bottom:0.35rem;}
+.section-card {background: rgba(255,255,255,0.96); border-radius: 18px; padding: 1rem; margin-bottom: 1rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -52,7 +44,15 @@ class TelanganaAgriModels:
         score = int(sum(features)) % len(season_crops)
         crop = season_crops[score]
         confidence = round(85 + (score % 10), 1)
-        return crop, confidence
+
+        all_scores = []
+        base = sum(features) / len(features)
+        for i, c in enumerate(season_crops):
+            crop_score = round(max(40, min(98, 60 + ((base + i * 7) % 35))), 1)
+            all_scores.append((c, crop_score))
+
+        all_scores = sorted(all_scores, key=lambda x: x[1], reverse=True)
+        return crop, confidence, all_scores
 
     def predict_crop_yield(self, features):
         ph, temp, rainfall, fert, humidity, moisture = features
@@ -64,15 +64,32 @@ class TelanganaAgriModels:
             + (moisture * 0.25)
             - abs(ph - 6.8) * 2.2
         )
-        return round(max(pred, 0), 2), 88.0
+        pred = round(max(pred, 0), 2)
+
+        months = ["Jun", "Jul", "Aug", "Sep", "Oct", "Nov"]
+        trend = [round(max(pred * f, 0), 2) for f in [0.42, 0.56, 0.71, 0.84, 0.93, 1.00]]
+        return pred, 88.0, months, trend
 
     def predict_irrigation(self, features):
         moisture, temp, humidity, ph, rainfall = features
         if rainfall > 150 or moisture > 55:
-            return "Low", "Skip irrigation cycle", 92.0
-        if moisture < 28 and temp > 32:
-            return "High", "Deep irrigation needed", 90.0
-        return "Moderate", "Light irrigation", 89.0
+            need = "Low"
+            action = "Skip irrigation cycle"
+            liters = [20, 15, 10, 10, 8, 8, 5]
+            conf = 92.0
+        elif moisture < 28 and temp > 32:
+            need = "High"
+            action = "Deep irrigation needed"
+            liters = [55, 58, 60, 50, 48, 46, 40]
+            conf = 90.0
+        else:
+            need = "Moderate"
+            action = "Light irrigation"
+            liters = [35, 38, 40, 34, 32, 30, 28]
+            conf = 89.0
+
+        days = ["Day1", "Day2", "Day3", "Day4", "Day5", "Day6", "Day7"]
+        return need, action, conf, days, liters
 
     def calculate_ndvi(self, red, nir):
         return round((nir - red) / (nir + red + 1e-8), 4)
@@ -83,32 +100,32 @@ class TelanganaAgriModels:
 
     def predict_fertilizer(self, n, p, k):
         if n < 50:
-            return "Apply nitrogen fertilizer in split doses", 87.0
-        if p < 40:
-            return "Apply phosphorus fertilizer with basal dose", 86.0
-        if k < 40:
-            return "Apply potash for stress tolerance", 85.0
-        return "Use balanced NPK fertilizer with organic manure", 89.0
+            rec = "Apply nitrogen fertilizer in split doses"
+        elif p < 40:
+            rec = "Apply phosphorus fertilizer with basal dose"
+        elif k < 40:
+            rec = "Apply potash for stress tolerance"
+        else:
+            rec = "Use balanced NPK fertilizer with organic manure"
+
+        conf = 89.0
+        target = {"N": 80, "P": 45, "K": 45}
+        current = {"N": n, "P": p, "K": k}
+        gap = {k1: max(target[k1] - current[k1], 0) for k1 in target}
+        return rec, conf, current, target, gap
 
     def predict_disease(self, arr):
         score = int(np.mean(arr)) % 4
         labels = ["Healthy", "Leaf Blight", "Rust", "Leaf Spot"]
+        probs = np.array([0.12, 0.18, 0.22, 0.16], dtype=float)
+        probs[score] = 0.62
+        probs = probs / probs.sum()
         return {
             "class_index": score,
             "class_name": labels[score],
-            "confidence": 0.88
+            "confidence": float(np.max(probs)),
+            "all_probs": {labels[i]: round(float(probs[i]) * 100, 2) for i in range(len(labels))}
         }
-
-    def model_status(self):
-        return pd.DataFrame([
-            {"Model": "crop_recommendation", "Status": "Ready", "Reason": "Rule-based local logic"},
-            {"Model": "yield_prediction", "Status": "Ready", "Reason": "Rule-based local logic"},
-            {"Model": "irrigation", "Status": "Ready", "Reason": "Rule-based local logic"},
-            {"Model": "fertilizer", "Status": "Ready", "Reason": "Rule-based local logic"},
-            {"Model": "ndvi", "Status": "Ready", "Reason": "Formula-based logic"},
-            {"Model": "disease_detection", "Status": "Ready", "Reason": "Simple image analysis"},
-            {"Model": "tensorflow", "Status": "Optional", "Reason": "Imported only if installed"}
-        ])
 
 
 agrimodels = TelanganaAgriModels()
@@ -126,32 +143,32 @@ if "season" not in st.session_state:
     st.session_state.season = "Kharif"
 
 
-def get_gemini_api_key():
+def get_openai_api_key():
     try:
-        if "GEMINI_API_KEY" in st.secrets:
-            key = str(st.secrets["GEMINI_API_KEY"]).strip()
+        if "OPENAI_API_KEY" in st.secrets:
+            key = str(st.secrets["OPENAI_API_KEY"]).strip()
             if key:
                 return key
     except Exception:
         pass
 
-    env_key = os.getenv("GEMINI_API_KEY", "").strip()
+    env_key = os.getenv("OPENAI_API_KEY", "").strip()
     if env_key:
         return env_key
 
     return ""
 
 
-def get_gemini_reply(user_text, farm_data, district, season):
-    api_key = get_gemini_api_key()
+def get_openai_reply(user_text, farm_data, district, season):
+    api_key = get_openai_api_key()
 
     if not api_key:
-        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit Cloud secrets."
+        return "OpenAI API key missing. Add OPENAI_API_KEY in Streamlit Cloud secrets."
 
     try:
-        from google import genai
+        from openai import OpenAI
 
-        client = genai.Client(api_key=api_key)
+        client = OpenAI(api_key=api_key)
 
         farm_context = "No latest farm data available."
         if farm_data:
@@ -162,39 +179,27 @@ def get_gemini_reply(user_text, farm_data, district, season):
                 f"Health score: {farm_data.get('health')}%. Fertilizer: {farm_data.get('fertilizer')}."
             )
 
-        prompt = f"""
-You are AgriVision AI, a practical Telangana agriculture assistant.
-
-Answer in simple farmer-friendly language.
-
-Structure reply as:
-1. What is happening
-2. Why
-3. Immediate action
-4. Next 3 days
-
-Farm context:
-{farm_context}
-
-User question:
-{user_text}
-"""
-
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
+        system_prompt = (
+            "You are AgriVision AI, a practical Telangana agriculture assistant. "
+            "Answer in simple farmer-friendly language. "
+            "Always format replies as: 1. What is happening 2. Why 3. Immediate action 4. Next 3 days."
         )
 
-        if hasattr(response, "text") and response.text:
-            return response.text
+        user_prompt = f"Farm context: {farm_context}\n\nUser question: {user_text}"
 
-        return str(response)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+
+        return response.choices[0].message.content
 
     except Exception as e:
-        error_text = str(e)
-        if "API_KEY_INVALID" in error_text or "API key not valid" in error_text:
-            return "Gemini API key is invalid. Please update GEMINI_API_KEY in Streamlit secrets and redeploy."
-        return f"Gemini chatbot error: {error_text}"
+        return f"OpenAI chatbot error: {e}"
 
 
 def process_image(uploaded_file):
@@ -237,7 +242,6 @@ def render_top_dashboard():
 
 
 st.sidebar.title("🌾 AgriVision AI")
-
 page = st.sidebar.radio(
     "Choose Module",
     [
@@ -259,20 +263,6 @@ st.session_state.district = st.sidebar.selectbox(
 )
 st.session_state.season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"])
 
-st.sidebar.markdown("### Engine Status")
-if TF_AVAILABLE:
-    st.sidebar.markdown("<span class='model-ok'>TensorFlow installed</span>", unsafe_allow_html=True)
-else:
-    st.sidebar.markdown("<span class='model-miss'>TensorFlow not installed</span>", unsafe_allow_html=True)
-
-if get_gemini_api_key():
-    st.sidebar.markdown("<span class='model-ok'>Gemini key detected</span>", unsafe_allow_html=True)
-else:
-    st.sidebar.markdown("<span class='model-miss'>Gemini key missing</span>", unsafe_allow_html=True)
-
-with st.sidebar.expander("Model Status"):
-    st.dataframe(agrimodels.model_status(), use_container_width=True, hide_index=True)
-
 render_header()
 render_top_dashboard()
 
@@ -284,7 +274,6 @@ if page == "Dashboard":
         "Day": [f"Day {i}" for i in range(1, 31)],
         "Health Index": [72, 74, 73, 75, 77, 76, 78, 79, 80, 78, 81, 83, 82, 84, 85, 86, 84, 87, 88, 89, 87, 90, 91, 89, 92, 93, 91, 94, 95, 96]
     })
-
     zone_df = pd.DataFrame({
         "Zone": ["Healthy", "Moderate", "High Risk", "Critical"],
         "Value": [52, 28, 14, 6]
@@ -308,37 +297,33 @@ elif page == "Smart Advisor":
     st.markdown("## Smart Farm Advisor")
 
     a, b, c = st.columns(3)
-
     with a:
         n = st.number_input("Nitrogen (N)", value=88.0)
         p = st.number_input("Phosphorus (P)", value=40.0)
         k = st.number_input("Potassium (K)", value=41.0)
         ph = st.number_input("Soil pH", value=6.7)
-
     with b:
         temp = st.number_input("Temperature (°C)", value=29.0)
         humidity = st.number_input("Humidity (%)", value=78.0)
         rainfall = st.number_input("Rainfall (mm)", value=180.0)
-
     with c:
         moisture = st.number_input("Soil Moisture (%)", value=42.0)
         red = st.number_input("Red Band", min_value=0.0, max_value=1.0, value=0.30)
         nir = st.number_input("NIR Band", min_value=0.0, max_value=1.0, value=0.72)
 
     if st.button("Run Analysis", type="primary", use_container_width=True):
-        crop, crop_conf = agrimodels.predict_crop_recommendation(
-            [n, p, k, temp, humidity, ph, rainfall],
-            st.session_state.season
+        crop, crop_conf, crop_scores = agrimodels.predict_crop_recommendation(
+            [n, p, k, temp, humidity, ph, rainfall], st.session_state.season
         )
-        irrigation, action, irr_conf = agrimodels.predict_irrigation(
+        irrigation, action, irr_conf, irr_days, irr_liters = agrimodels.predict_irrigation(
             [moisture, temp, humidity, ph, rainfall]
         )
-        yield_pred, yield_conf = agrimodels.predict_crop_yield(
+        yield_pred, yield_conf, months, yield_trend = agrimodels.predict_crop_yield(
             [ph, temp, rainfall, n, humidity, moisture]
         )
         ndvi = agrimodels.calculate_ndvi(red, nir)
         health = agrimodels.predict_health_score(ndvi, moisture, temp)
-        fert, fert_conf = agrimodels.predict_fertilizer(n, p, k)
+        fert, fert_conf, current_npk, target_npk, gap_npk = agrimodels.predict_fertilizer(n, p, k)
 
         st.session_state.latest_farm_data = {
             "crop": crop,
@@ -350,44 +335,77 @@ elif page == "Smart Advisor":
             "fertilizer": fert
         }
 
-        x1, x2, x3 = st.columns(3)
-        x1.metric("Crop", crop, f"{crop_conf}% confidence")
-        x2.metric("Irrigation", irrigation, action)
-        x3.metric("Yield", f"{yield_pred} t/ha", f"{yield_conf}% confidence")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Recommended Crop", crop, f"{crop_conf}% confidence")
+        m2.metric("Irrigation", irrigation, action)
+        m3.metric("Yield", f"{yield_pred} t/ha", f"{yield_conf}% confidence")
+        m4.metric("Health Score", f"{health}%", f"NDVI {ndvi}")
 
         st.markdown(
-            f"<div class='health-card'><h3>Final Farm Decision</h3>"
-            f"<p><strong>Recommended crop:</strong> {crop}</p>"
+            f"<div class='health-card'><h3>Farm Decision Summary</h3>"
+            f"<p><strong>Crop:</strong> {crop}</p>"
             f"<p><strong>Irrigation:</strong> {irrigation} - {action}</p>"
             f"<p><strong>Fertilizer:</strong> {fert}</p>"
-            f"<p><strong>NDVI:</strong> {ndvi} | <strong>Health score:</strong> {health}%</p>"
             f"<p><strong>Expected yield:</strong> {yield_pred} t/ha</p></div>",
             unsafe_allow_html=True
         )
 
+        c1, c2 = st.columns(2)
+
+        with c1:
+            crop_df = pd.DataFrame(crop_scores, columns=["Crop", "Suitability"])
+            fig_crop = px.bar(crop_df, x="Crop", y="Suitability", color="Suitability", title="Crop Suitability Scores")
+            st.plotly_chart(fig_crop, use_container_width=True)
+
+            yield_df = pd.DataFrame({"Month": months, "Yield Build-up": yield_trend})
+            fig_yield = px.line(yield_df, x="Month", y="Yield Build-up", markers=True, title="Yield Forecast Trend")
+            st.plotly_chart(fig_yield, use_container_width=True)
+
+        with c2:
+            irr_df = pd.DataFrame({"Day": irr_days, "Water (liters/acre)": irr_liters})
+            fig_irr = px.area(irr_df, x="Day", y="Water (liters/acre)", title="7-Day Irrigation Plan")
+            st.plotly_chart(fig_irr, use_container_width=True)
+
+            npk_df = pd.DataFrame({
+                "Nutrient": ["N", "P", "K"],
+                "Current": [current_npk["N"], current_npk["P"], current_npk["K"]],
+                "Target": [target_npk["N"], target_npk["P"], target_npk["K"]]
+            })
+            fig_npk = go.Figure()
+            fig_npk.add_bar(name="Current", x=npk_df["Nutrient"], y=npk_df["Current"])
+            fig_npk.add_bar(name="Target", x=npk_df["Nutrient"], y=npk_df["Target"])
+            fig_npk.update_layout(barmode="group", title="NPK Current vs Target")
+            st.plotly_chart(fig_npk, use_container_width=True)
+
 
 elif page == "Crop Recommendation":
     vals = [st.number_input(f"Feature {i+1}", value=float(80 + i)) for i in range(7)]
-
     if st.button("Recommend Crop", use_container_width=True):
-        crop, conf = agrimodels.predict_crop_recommendation(vals, st.session_state.season)
+        crop, conf, crop_scores = agrimodels.predict_crop_recommendation(vals, st.session_state.season)
         st.success(f"Recommended crop: {crop} ({conf}% confidence)")
+        crop_df = pd.DataFrame(crop_scores, columns=["Crop", "Suitability"])
+        fig = px.bar(crop_df, x="Crop", y="Suitability", color="Suitability", title="Crop Recommendation Ranking")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 elif page == "Yield Prediction":
     vals = [st.number_input(f"Input {i+1}", value=25.0 + i) for i in range(6)]
-
     if st.button("Predict Yield", use_container_width=True):
-        y, conf = agrimodels.predict_crop_yield(vals)
+        y, conf, months, trend = agrimodels.predict_crop_yield(vals)
         st.metric("Expected Yield", f"{y} t/ha", f"{conf}% confidence")
+        df = pd.DataFrame({"Month": months, "Yield Build-up": trend})
+        fig = px.line(df, x="Month", y="Yield Build-up", markers=True, title="Predicted Yield Progress")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 elif page == "Irrigation":
     vals = [st.number_input(f"Parameter {i+1}", value=40.0 + i) for i in range(5)]
-
     if st.button("Get Irrigation Plan", use_container_width=True):
-        result, action, conf = agrimodels.predict_irrigation(vals)
+        result, action, conf, days, liters = agrimodels.predict_irrigation(vals)
         st.info(f"Need: {result} | Action: {action} | Confidence: {conf}%")
+        df = pd.DataFrame({"Day": days, "Water": liters})
+        fig = px.bar(df, x="Day", y="Water", color="Water", title="Weekly Irrigation Schedule")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 elif page == "Fertilizer & Soil":
@@ -396,14 +414,20 @@ elif page == "Fertilizer & Soil":
     k = st.number_input("Potassium", value=42.0)
 
     if st.button("Analyze Soil", use_container_width=True):
-        fert, conf = agrimodels.predict_fertilizer(n, p, k)
+        fert, conf, current_npk, target_npk, gap_npk = agrimodels.predict_fertilizer(n, p, k)
+        st.success(f"Recommendation: {fert} ({conf}% confidence)")
+
         soil_df = pd.DataFrame({
             "Nutrient": ["N", "P", "K"],
-            "Value": [n, p, k]
+            "Current": [current_npk["N"], current_npk["P"], current_npk["K"]],
+            "Gap": [gap_npk["N"], gap_npk["P"], gap_npk["K"]]
         })
-        fig = px.bar(soil_df, x="Nutrient", y="Value", color="Nutrient", title="Soil Nutrient Levels")
-        st.plotly_chart(fig, use_container_width=True)
-        st.success(f"Recommendation: {fert} ({conf}% confidence)")
+
+        fig1 = px.bar(soil_df, x="Nutrient", y="Current", color="Nutrient", title="Current Soil Nutrients")
+        st.plotly_chart(fig1, use_container_width=True)
+
+        fig2 = px.pie(soil_df, names="Nutrient", values="Gap", title="Nutrient Deficiency Share")
+        st.plotly_chart(fig2, use_container_width=True)
 
 
 elif page == "NDVI Analysis":
@@ -416,16 +440,21 @@ elif page == "NDVI Analysis":
         ndvi = agrimodels.calculate_ndvi(red, nir)
         health = agrimodels.predict_health_score(ndvi, moisture, temp)
 
-        gauge = go.Figure(
-            go.Indicator(
-                mode="gauge+number",
-                value=health,
-                title={'text': "Health Score"},
-                gauge={'axis': {'range': [0, 100]}}
-            )
-        )
+        gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=health,
+            title={'text': "Health Score"},
+            gauge={'axis': {'range': [0, 100]}}
+        ))
         gauge.update_layout(height=350)
         st.plotly_chart(gauge, use_container_width=True)
+
+        comp_df = pd.DataFrame({
+            "Metric": ["NDVI", "Moisture", "Temperature Impact", "Health Score"],
+            "Value": [ndvi * 100, moisture, max(0, 100 - abs(temp - 28) * 4), health]
+        })
+        fig = px.bar(comp_df, x="Metric", y="Value", color="Metric", title="Vegetation and Health Metrics")
+        st.plotly_chart(fig, use_container_width=True)
         st.success(f"NDVI: {ndvi} | Health score: {health}%")
 
 
@@ -443,6 +472,13 @@ elif page == "Disease Detection":
                 f"(confidence: {round(result['confidence'] * 100, 2)}%)"
             )
 
+            prob_df = pd.DataFrame({
+                "Condition": list(result["all_probs"].keys()),
+                "Probability": list(result["all_probs"].values())
+            })
+            fig = px.bar(prob_df, x="Condition", y="Probability", color="Probability", title="Disease Prediction Confidence")
+            st.plotly_chart(fig, use_container_width=True)
+
 
 elif page == "AI Assistant":
     toolbar_text = (
@@ -456,7 +492,7 @@ elif page == "AI Assistant":
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    prompt = st.chat_input("Ask about irrigation, crop, disease, fertilizer, or Telangana farming...")
+    prompt = st.chat_input("Ask about irrigation, crop, disease, fertilizer, or Telangana farming")
     if prompt:
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
@@ -464,8 +500,8 @@ elif page == "AI Assistant":
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            with st.spinner("AgriVision AI is analyzing..."):
-                reply = get_gemini_reply(
+            with st.spinner("AgriVision AI is thinking..."):
+                reply = get_openai_reply(
                     prompt,
                     st.session_state.latest_farm_data,
                     st.session_state.district,
@@ -477,6 +513,6 @@ elif page == "AI Assistant":
 
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;color:#94a3b8;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Gemini-ready assistant</div>",
+    "<div style='text-align:center;color:#94a3b8;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Visualization-first edition</div>",
     unsafe_allow_html=True
 )
