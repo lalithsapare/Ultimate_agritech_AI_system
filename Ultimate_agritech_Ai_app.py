@@ -22,20 +22,20 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.main {background: linear-gradient(135deg, #0f1f0f 0%, #1a2f1a 100%);}
+.main {background: linear-gradient(135deg, #0b1220 0%, #07111f 100%);}
 .block-container {padding-top: 1rem; padding-bottom: 1rem;}
-[data-testid="stSidebar"] {background: linear-gradient(180deg, #14532d 0%, #166534 50%, #14532d 100%);}
+[data-testid="stSidebar"] {background: linear-gradient(180deg, #166534 0%, #166534 50%, #14532d 100%);}
 [data-testid="stSidebar"] * {color: white !important;}
 .hero-dashboard {background: linear-gradient(90deg, #166534, #22c55e, #16a34a); color: white; padding: 1.8rem 1.5rem; border-radius: 24px; box-shadow: 0 12px 32px rgba(22, 101, 52, 0.3); margin-bottom: 1.5rem;}
-.metric-card {background: rgba(255,255,255,0.97); border-radius: 20px; padding: 1.4rem; text-align: center; border: 1px solid #dcfce7; box-shadow: 0 8px 24px rgba(0,0,0,0.12);}
-.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 6px solid #16a34a; border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15);}
+.metric-card {background: rgba(255,255,255,0.96); border-radius: 20px; padding: 1.4rem; text-align: center; border: 1px solid #dcfce7; box-shadow: 0 8px 24px rgba(0,0,0,0.12);}
+.health-card {background: linear-gradient(135deg, #f0fdf4, #dcfce7); border-left: 6px solid #16a34a; border-radius: 20px; padding: 1.4rem; box-shadow: 0 8px 24px rgba(22,101,52,0.15); color: #14532d;}
 .chat-toolbar {background: rgba(255,255,255,0.96); border-radius: 16px; padding: 1rem 1.2rem; border: 1px solid #dcfce7; margin-bottom: 1rem; color: #14532d;}
 .farm-title {font-size: 2.35rem; font-weight: 800; margin: 0;}
 .subtitle {margin: 0.4rem 0 0 0; font-size: 1.05rem; opacity: 0.96;}
 .small-muted {color: #64748b; font-size: 0.9rem;}
 .badge-good {background: #dcfce7; color: #166534; padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 700;}
-.model-ok {background:#dcfce7;color:#166534;padding:0.25rem 0.5rem;border-radius:999px;font-size:0.75rem;font-weight:700;}
-.model-miss {background:#fee2e2;color:#b91c1c;padding:0.25rem 0.5rem;border-radius:999px;font-size:0.75rem;font-weight:700;}
+.model-ok {background:#dcfce7;color:#166534;padding:0.35rem 0.55rem;border-radius:999px;font-size:0.75rem;font-weight:700;display:inline-block;margin-bottom:0.35rem;}
+.model-miss {background:#fee2e2;color:#b91c1c;padding:0.35rem 0.55rem;border-radius:999px;font-size:0.75rem;font-weight:700;display:inline-block;margin-bottom:0.35rem;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,16 +100,15 @@ class TelanganaAgriModels:
         }
 
     def model_status(self):
-        rows = [
-            {"Model": "crop_recommendation", "Status": "Demo mode", "Reason": "Local rule-based model"},
-            {"Model": "yield_prediction", "Status": "Demo mode", "Reason": "Local rule-based model"},
-            {"Model": "irrigation", "Status": "Demo mode", "Reason": "Local rule-based model"},
-            {"Model": "fertilizer", "Status": "Demo mode", "Reason": "Local rule-based model"},
-            {"Model": "ndvi", "Status": "Demo mode", "Reason": "Local calculation"},
-            {"Model": "disease_detection", "Status": "Demo mode", "Reason": "Simple image rule logic"},
-            {"Model": "tensorflow", "Status": "Optional", "Reason": "Imported only if available"}
-        ]
-        return pd.DataFrame(rows)
+        return pd.DataFrame([
+            {"Model": "crop_recommendation", "Status": "Ready", "Reason": "Rule-based local logic"},
+            {"Model": "yield_prediction", "Status": "Ready", "Reason": "Rule-based local logic"},
+            {"Model": "irrigation", "Status": "Ready", "Reason": "Rule-based local logic"},
+            {"Model": "fertilizer", "Status": "Ready", "Reason": "Rule-based local logic"},
+            {"Model": "ndvi", "Status": "Ready", "Reason": "Formula-based logic"},
+            {"Model": "disease_detection", "Status": "Ready", "Reason": "Simple image analysis"},
+            {"Model": "tensorflow", "Status": "Optional", "Reason": "Imported only if installed"}
+        ])
 
 
 agrimodels = TelanganaAgriModels()
@@ -130,9 +129,9 @@ if "season" not in st.session_state:
 def get_gemini_api_key():
     try:
         if "GEMINI_API_KEY" in st.secrets:
-            key = st.secrets["GEMINI_API_KEY"]
-            if key and str(key).strip():
-                return str(key).strip()
+            key = str(st.secrets["GEMINI_API_KEY"]).strip()
+            if key:
+                return key
     except Exception:
         pass
 
@@ -147,7 +146,7 @@ def get_gemini_reply(user_text, farm_data, district, season):
     api_key = get_gemini_api_key()
 
     if not api_key:
-        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit secrets or environment variables."
+        return "Gemini API key missing. Add GEMINI_API_KEY in Streamlit Cloud secrets."
 
     try:
         from google import genai
@@ -183,7 +182,7 @@ User question:
 
         response = client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=prompt,
+            contents=prompt
         )
 
         if hasattr(response, "text") and response.text:
@@ -194,7 +193,7 @@ User question:
     except Exception as e:
         error_text = str(e)
         if "API_KEY_INVALID" in error_text or "API key not valid" in error_text:
-            return "Gemini API key is invalid. Create a fresh key in Google AI Studio and save it as GEMINI_API_KEY in Streamlit secrets."
+            return "Gemini API key is invalid. Please update GEMINI_API_KEY in Streamlit secrets and redeploy."
         return f"Gemini chatbot error: {error_text}"
 
 
@@ -262,12 +261,11 @@ st.session_state.season = st.sidebar.selectbox("Season", ["Kharif", "Rabi"])
 
 st.sidebar.markdown("### Engine Status")
 if TF_AVAILABLE:
-    st.sidebar.markdown("<span class='model-ok'>TensorFlow optional support ON</span>", unsafe_allow_html=True)
+    st.sidebar.markdown("<span class='model-ok'>TensorFlow installed</span>", unsafe_allow_html=True)
 else:
     st.sidebar.markdown("<span class='model-miss'>TensorFlow not installed</span>", unsafe_allow_html=True)
 
-key_present = bool(get_gemini_api_key())
-if key_present:
+if get_gemini_api_key():
     st.sidebar.markdown("<span class='model-ok'>Gemini key detected</span>", unsafe_allow_html=True)
 else:
     st.sidebar.markdown("<span class='model-miss'>Gemini key missing</span>", unsafe_allow_html=True)
@@ -479,6 +477,6 @@ elif page == "AI Assistant":
 
 st.markdown("---")
 st.markdown(
-    "<div style='text-align:center;color:#6b7280;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Gemini chatbot ready</div>",
+    "<div style='text-align:center;color:#94a3b8;padding:18px;font-size:14px;'>🌾 AgriVision AI | Farm Health AI | Telangana Edition | Gemini-ready assistant</div>",
     unsafe_allow_html=True
 )
