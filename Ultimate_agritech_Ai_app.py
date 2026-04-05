@@ -216,7 +216,42 @@ class CNNModelService:
         self.classes = {}
         self.errors = {}
         self.target_size = (224, 224)
+
+        self.default_nutrient_classes = {
+            0: "Healthy",
+            1: "Nitrogen Deficiency",
+            2: "Phosphorus Deficiency",
+            3: "Potassium Deficiency",
+            4: "Magnesium Deficiency",
+            5: "Zinc Deficiency",
+            6: "Iron Deficiency",
+            7: "Sulphur Deficiency"
+        }
+
         self._load_all()
+
+    def _normalize_classes(self, loaded_classes, model_key=None):
+        if loaded_classes is None:
+            if model_key == "nutrient_deficiency":
+                return self.default_nutrient_classes
+            return []
+
+        if isinstance(loaded_classes, dict):
+            keys = list(loaded_classes.keys())
+            values = list(loaded_classes.values())
+
+            if all(isinstance(k, str) for k in keys) and all(isinstance(v, (int, np.integer)) for v in values):
+                return {int(v): str(k) for k, v in loaded_classes.items()}
+
+            if all(isinstance(k, (int, np.integer)) for k in keys):
+                return {int(k): str(v) for k, v in loaded_classes.items()}
+
+            return loaded_classes
+
+        if isinstance(loaded_classes, (list, tuple, np.ndarray)):
+            return list(loaded_classes)
+
+        return loaded_classes
 
     def _load_one(self, model_key, model_file, classes_file=None, fallback_classes=None):
         model_path = self.model_dir / model_file
@@ -229,61 +264,55 @@ class CNNModelService:
             self.errors[model_key] = "TensorFlow not installed"
             return
 
-        classes_obj = None
-        if classes_file:
-            classes_path = self.model_dir / classes_file
-            if not classes_path.exists():
-                if fallback_classes is None:
-                    self.errors[model_key] = f"Missing classes file: {classes_file}"
-                    return
-            else:
-                try:
-                    classes_obj = joblib.load(classes_path)
-                except Exception as e:
-                    self.errors[model_key] = f"Failed loading classes file {classes_file}: {e}"
-                    return
-
         try:
             self.models[model_key] = tf.keras.models.load_model(model_path)
-            self.classes[model_key] = classes_obj if classes_obj is not None else fallback_classes
+
+            loaded_classes = None
+            if classes_file:
+                classes_path = self.model_dir / classes_file
+                if classes_path.exists():
+                    loaded_classes = joblib.load(classes_path)
+                else:
+                    loaded_classes = fallback_classes
+            else:
+                loaded_classes = fallback_classes
+
+            self.classes[model_key] = self._normalize_classes(loaded_classes, model_key=model_key)
+
         except Exception as e:
             self.errors[model_key] = str(e)
 
-    def _normalize_class_mapping(self, class_obj):
-        if class_obj is None:
-            return {}
-
-        if isinstance(class_obj, dict):
-            keys = list(class_obj.keys())
-            vals = list(class_obj.values())
-
-            if len(keys) > 0:
-                if isinstance(keys[0], str) and isinstance(vals[0], (int, np.integer)):
-                    return {int(v): str(k) for k, v in class_obj.items()}
-                if isinstance(keys[0], (int, np.integer)):
-                    return {int(k): str(v) for k, v in class_obj.items()}
-
-        if isinstance(class_obj, (list, tuple, np.ndarray)):
-            return {i: str(v) for i, v in enumerate(class_obj)}
-
-        return {}
-
     def _load_all(self):
-        self._load_one("tomato_disease", "tomato_disease_model.h5", "tomato_classes.joblib")
-        self._load_one("rice_disease", "rice_disease_model.h5", "rice_classes.joblib")
-        self._load_one("rice_pest", "rice_pest_model.h5", "rice_pest_classes.joblib")
+        self._load_one(
+            "tomato_disease",
+            "tomato_disease_model.h5",
+            "tomato_classes.joblib"
+        )
+
+        self._load_one(
+            "rice_disease",
+            "rice_disease_model.h5",
+            "rice_classes.joblib"
+        )
+
+        self._load_one(
+            "rice_pest",
+            "rice_pest_model.h5",
+            "rice_pest_classes.joblib"
+        )
+
         self._load_one(
             "nutrient_deficiency",
             "nutrient_deficiency_cnn_model.keras",
             "nutrient_deficiency_classes.joblib",
-            fallback_classes=[
-                "Nitrogen Deficiency",
-                "Phosphorus Deficiency",
-                "Potassium Deficiency",
-                "Healthy"
-            ]
+            fallback_classes=self.default_nutrient_classes
         )
-        self._load_one("leaf_detection", "leaf_model.h5", "leaf_classes.joblib")
+
+        self._load_one(
+            "leaf_detection",
+            "leaf_model.h5",
+            "leaf_classes.joblib"
+        )
 
     def has_model(self, model_key):
         return model_key in self.models
@@ -303,16 +332,17 @@ class CNNModelService:
 
         _, arr = self.preprocess_image(pil_image)
         pred = self.models[model_key].predict(arr, verbose=0)
-        pred = np.array(pred)
-
-        if pred.ndim == 1:
-            pred = np.expand_dims(pred, axis=0)
-
         class_idx = int(np.argmax(pred, axis=1)[0])
         confidence = float(np.max(pred, axis=1)[0])
 
-        mapping = self._normalize_class_mapping(self.classes.get(model_key))
-        label = mapping.get(class_idx, str(class_idx))
+        class_list = self.classes.get(model_key, [])
+
+        if isinstance(class_list, dict):
+            label = class_list.get(class_idx, str(class_idx))
+        elif isinstance(class_list, (list, tuple, np.ndarray)):
+            label = class_list[class_idx] if class_idx < len(class_list) else str(class_idx)
+        else:
+            label = str(class_idx)
 
         return {
             "class_index": class_idx,
@@ -576,7 +606,7 @@ def generate_farm_report(farm_data, multi_crop_df=None):
 def wow_feature_box():
     st.markdown("""
     <div class="wow-box">
-    🚀 WOW FEATURE: Multi-crop comparison, trained ML prediction, smart alerts, visual analytics, downloadable farm report, and CNN-based disease/pest/nutrient detection in one dashboard.
+    🚀 WOW FEATURE: Multi-crop comparison, trained ML prediction, smart alerts, visual analytics, downloadable farm report, and CNN-based disease/pest detection in one dashboard.
     </div>
     """, unsafe_allow_html=True)
 
@@ -718,7 +748,7 @@ page = st.sidebar.radio(
         "Disease Detection",
         "Pest Detection",
         "Leaf Detection",
-        "Nutrient Deficiency Detection",
+        "Nutrient Deficiency",
         "AI Assistant"
     ],
 )
@@ -1064,11 +1094,15 @@ elif page == "Leaf Detection":
             except Exception as e:
                 st.error(f"Prediction error: {e}")
 
-elif page == "Nutrient Deficiency Detection":
+elif page == "Nutrient Deficiency":
     st.markdown("## Nutrient Deficiency Detection")
     st.caption("No change in previous app system. Added CNN model prediction for nutrient deficiency detection.")
 
-    uploaded_file = st.file_uploader("Upload nutrient deficiency leaf image", type=["jpg", "jpeg", "png"], key="nutrient_upload")
+    uploaded_file = st.file_uploader(
+        "Upload nutrient deficiency leaf image",
+        type=["jpg", "jpeg", "png"],
+        key="nutrient_upload"
+    )
 
     if uploaded_file:
         image = process_image(uploaded_file)
@@ -1102,7 +1136,7 @@ elif page == "AI Assistant":
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    if prompt := st.chat_input("Ask about irrigation, crop, disease, fertilizer, pest, nutrient deficiency, or Telangana farming..."):
+    if prompt := st.chat_input("Ask about irrigation, crop, disease, fertilizer, pest, or Telangana farming..."):
         st.session_state.chat_history.append({"role": "user", "content": prompt})
 
         with st.chat_message("user"):
